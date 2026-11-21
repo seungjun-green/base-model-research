@@ -2,33 +2,29 @@
 
 ## Runtime
 
-In hosted Colab, select **RTX PRO 6000** in the runtime selection menu. Run the
-**Google Drive storage** cell in each notebook and approve access when prompted.
+In hosted Colab, select **CPU** for notebook 01 and **RTX PRO 6000** for the
+other six notebooks. Run **Experiment storage** in each notebook and approve the Google Drive mount.
 The cell prints the experiment folder shared by all notebooks.
 
-Use Linux, a compatible NVIDIA driver, and a CUDA-enabled PyTorch build supporting
-the GPU. The target machine should have enough host RAM and local SSD for ~48 GB
-of prepared tokens, caches, and the
-Python environment. FP32 model weights, gradients, and two Adam moments already
+Allow about 48 GB of local disk space for prepared tokens, plus room for caches
+and the Python environment. FP32 model weights, gradients, and two Adam moments
 occupy roughly 9.6 GB for a 0.6B model before activations, logits, and overhead.
 Each main-model checkpoint uses about 7.2 GB on Drive for the FP32 weights and
 two Adam moments. Budget about 144 GB per main model, or 288 GB for both, plus the corpus.
 
 Notebook 00 reports the GPU, runs CPU correctness checks, records activation
-magnitudes across widths, and measures real GPU training throughput. Repeat its
-profile cell for all four models. Start with microbatch 4, reduce it if needed,
-and preserve global batch 128 using accumulation. Activation checkpointing may
-be enabled consistently in the relevant launcher arguments. No GPU performance
-or Blackwell kernel compatibility has been established by the local CPU tests.
+magnitudes across widths, and profiles all four models in one cell. If a profile
+runs out of memory, reduce `MICROBATCH_SIZE` in that cell and rerun it. New training
+runs read their model's memory settings from its saved profile. An existing run
+keeps the settings it started with. The global batch size stays at 128.
 
 ## GitHub and environment
 
-Push the updated project to GitHub and open notebook 00 in Colab. After mounting
-Drive, enter the repository HTTPS URL and full commit SHA when prompted. The
-notebook saves them in `source.json` in the experiment folder. Every notebook
-that opens this folder reuses that checkout automatically. Use a different
-`EXPERIMENT` name for a new revision. For an existing run created before
-`source.json` was introduced, enter its original commit on the first prompt.
+Open notebook 00 in Colab, mount Drive, and run the setup cell. All seven notebooks
+use [seungjun-green/base-model-research](https://github.com/seungjun-green/base-model-research).
+The first setup in a new experiment saves the current commit of the repository's
+default branch in `source.json` on Drive. Later notebooks and fresh runtimes reuse
+that commit automatically. Use a new `EXPERIMENT` name to pick up a newer revision.
 
 Notebooks 00–05 share an isolated data and training environment. Notebook 06
 installs the evaluation harness in its own environment. On a fresh runtime,
@@ -79,9 +75,11 @@ tokenizer, manifest, and verified shards to `My Drive/bmr/data/fineweb_edu/`
 (about 48 GB). On a fresh VM, the first full proxy or main run copies the corpus
 back to the SSD. Further full runs reuse that copy. Rerun the cell
 after an interrupted transfer to reuse the shards that passed verification.
+If tokenization itself was interrupted, rerunning starts it again in a fresh temporary directory.
 Notebook 06 reads just the saved tokenizer.
 
-Run outputs go directly to `My Drive/bmr/runs/experiment_003/`.
+Run outputs go directly to `My Drive/bmr/runs/standard_vs_gated/`. To continue
+an existing experiment, use its original folder name for `EXPERIMENT` in all notebooks.
 
 | Notebook | Output in the experiment folder |
 | --- | --- |
@@ -94,9 +92,8 @@ Each checkpoint contains the updated weights, optimizer state and position in th
 training stream. The 20th includes the last gradient update. Notebook 06 loads
 that final checkpoint from each completed run.
 
-The new default experiment folder gets its own Git pin. Enter the commit with
-these changes at setup. To reuse finished proxy searches from `experiment_002`,
-set `PROXY_EXPERIMENT = "experiment_002"` in notebooks 04 and 05. They use the
+Notebooks 04 and 05 find the corresponding proxy winner in the current experiment.
+To reuse one from a different experiment, set `WINNER` to its `best_hparams.json` path. They use the
 shared corpus and verify each winner's training settings and dataset fingerprint.
 Earlier weights-only files can still be evaluated with their original protocol.
 

@@ -167,6 +167,20 @@ def test_preparation_pins_revisions_and_splits_whole_documents(tmp_path, monkeyp
 
     monkeypatch.setattr(datasets, "load_dataset", load)
     output = tmp_path / "prepared"
+    with monkeypatch.context() as patch:
+        from base_model_research.data import TokenWriter
+
+        write = TokenWriter.write
+
+        def interrupt(writer, tokens):
+            write(writer, tokens)
+            if writer.split == "train":
+                raise KeyboardInterrupt
+
+        patch.setattr(TokenWriter, "write", interrupt)
+        with pytest.raises(KeyboardInterrupt):
+            prepare_data(output, max_training_tokens=25, validation_documents=2, shard_tokens=7)
+    assert not output.exists() and not list(tmp_path.glob("prepared.preparing*"))
     manifest = prepare_data(output, max_training_tokens=25, validation_documents=2, shard_tokens=7)
     assert manifest["dataset_revision"] == received["revision"] == "data-sha"
     assert manifest["tokenizer_revision"] == "tokenizer-sha"
@@ -231,6 +245,11 @@ def test_notebook_cells_are_valid_python_and_have_no_saved_outputs():
     assert len(notebooks) == 7
     for path in notebooks:
         notebook = json.loads(path.read_text())
+        if path.name.startswith("01_"):
+            assert "accelerator" not in notebook["metadata"]
+            assert "CPU" in notebook["cells"][0]["source"]
+        else:
+            assert notebook["metadata"]["accelerator"] == "GPU"
         for cell in notebook["cells"]:
             if cell["cell_type"] == "code":
                 assert cell["execution_count"] is None and not cell["outputs"]
@@ -252,35 +271,45 @@ def test_proxy_notebook_smoke_then_full_uses_the_same_trial(
     cached = tmp_path / "ssd"
     paths = []
 
-    def run_training(command, *args):
-        assert command == "sweep"
-        data = args[args.index("--data") + 1]
+    def run_with_progress(command, *, cwd):
+        assert "sweep" in command
+        assert command[command.index("--microbatch-size") + 1] == "2"
+        assert "--activation-checkpointing" not in command
+        data = Path(command[command.index("--data") + 1])
         paths.append(data)
-        limited = "--stop-after-updates" in args
+        limited = "--stop-after-updates" in command
         sweep(
             replace(tiny_config, family=family),
             replace(training_config, tokens_per_parameter=5),
             data,
-            args[args.index("--output") + 1],
+            command[command.index("--output") + 1],
             trials,
             device="cpu",
-            stop_after_updates=args[args.index("--stop-after-updates") + 1] if limited else None,
+            stop_after_updates=int(command[command.index("--stop-after-updates") + 1]) if limited else None,
         )
 
     env = {
         "RUNS": tmp_path / "runs",
         "SAVED_DATA": corpus,
-        "MICROBATCH_SIZE": 2,
+        "DATA": cached,
+        "REPO": Path("."),
+        "PYTHON": "python",
+        "json": json,
         "RUN_SMOKE": True,
         "RUN_FULL": True,
-        "run_training": run_training,
-        "training_data": lambda: shutil.copytree(corpus, cached),
+        "run_with_progress": run_with_progress,
+        "run": lambda *args: shutil.copytree(corpus, cached),
     }
 
     def run_cell(marker):
         source = next(cell for cell in cells if marker in cell)
         exec(compile(source, str(notebook), "exec"), env)  # noqa: S102 - run the generated notebook cell
 
+    env["RUNS"].mkdir()
+    profile = env["RUNS"] / f"{family}_proxy_profile.json"
+    profile.write_text(json.dumps({"training": {"microbatch_size": 2, "activation_checkpointing": False}}))
+    setup = next(cell for cell in cells if "def training_data(" in cell)
+    exec(setup[setup.index("def training_data(") :], env)  # noqa: S102 - generated notebook functions
     run_cell("def run_proxy(")
     run_cell("if RUN_SMOKE:")
     result_path = env["FAMILY_RUNS"] / "trial_000" / "result.json"
@@ -288,6 +317,7 @@ def test_proxy_notebook_smoke_then_full_uses_the_same_trial(
     assert paused["status"] == "paused" and paused["step"] == 10
     assert paused["checkpoint"] is None
     assert paths == [corpus] and not cached.exists()
+    profile.write_text(json.dumps({"training": {"microbatch_size": 1, "activation_checkpointing": True}}))
     run_cell("if RUN_FULL:")
     finished = json.loads(result_path.read_text())
     assert paths == [corpus, cached] and finished["status"] == "complete"

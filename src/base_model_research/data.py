@@ -4,7 +4,9 @@ import hashlib
 import json
 from bisect import bisect_right
 from collections import OrderedDict
+from itertools import islice
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import numpy as np
 import torch
@@ -145,18 +147,15 @@ def prepare_data(
 ):
     """Download/tokenize once. Validation uses the first N complete documents.
 
-    Preparation is deliberately staged: an interrupted directory is never mistaken
-    for a complete corpus. Re-run with a new output or remove the incomplete staging
-    directory explicitly. Training itself resumes by absolute target-token offset.
+    Build in a private temporary directory and publish only the complete corpus.
     """
     from datasets import load_dataset
     from huggingface_hub import HfApi
     from transformers import AutoTokenizer
 
     output = Path(output)
-    staging = output.with_name(output.name + ".preparing")
-    if output.exists() or staging.exists():
-        raise FileExistsError(f"Output or staging directory already exists: {output}, {staging}")
+    if output.exists():
+        raise FileExistsError(f"Dataset output already exists: {output}")
     if max_training_tokens <= 0 or validation_documents <= 0:
         raise ValueError("Training tokens and validation document count must be positive")
     api = HfApi()
@@ -168,53 +167,57 @@ def prepare_data(
     documents = iter(
         load_dataset(dataset, name=dataset_config, split="train", streaming=True, revision=dataset_revision)
     )
-    staging.mkdir(parents=True)
-    tokenizer.save_pretrained(staging / "tokenizer")
-    train = TokenWriter(staging, "train", shard_tokens)
-    validation = TokenWriter(staging, "validation", shard_tokens)
-    identities = hashlib.sha256()
-    seen = 0
-    required = max_training_tokens + 1  # next-token lookahead
-    try:
-        while train.total < required:
-            batch = []
-            for _ in range(128):
-                try:
-                    batch.append(next(documents))
-                except StopIteration:
-                    break
-            if not batch:
-                raise ValueError(
-                    "Dataset exhausted before the requested budget; choose a larger dataset config"
-                )
-            encoded = tokenizer([row["text"] for row in batch], add_special_tokens=False)["input_ids"]
-            for row, tokens in zip(batch, encoded):
-                tokens = tokens + [tokenizer.eos_token_id]
-                identity = str(row.get("id", row.get("url", seen)))
-                identities.update(f"{seen}:{identity}\n".encode())
-                if seen < validation_documents:
-                    validation.write(tokens)
-                else:
-                    train.write(tokens[: required - train.total])
-                seen += 1
-                if train.total == required:
-                    break
-            print(f"Prepared {train.total:,}/{required:,} training tokens; {seen:,} documents", flush=True)
-    finally:
-        train_info, validation_info = train.finish(), validation.finish()
-    manifest = write_manifest(
-        staging,
-        {"train": train_info, "validation": validation_info},
-        dataset=dataset,
-        dataset_config=dataset_config,
-        dataset_revision=dataset_revision,
-        tokenizer=tokenizer_name,
-        tokenizer_revision=tokenizer_revision,
-        tokenizer_max_id=max(tokenizer.get_vocab().values()),
-        validation_documents=validation_documents,
-        documents_seen=seen,
-        document_order_sha256=identities.hexdigest(),
-        packing="continuous_document_stream_with_eos; shifted_targets; reset_positions_per_sequence",
-    )
-    staging.replace(output)
-    return manifest
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with TemporaryDirectory(dir=output.parent, prefix=f"{output.name}.preparing-") as temp:
+        staging = Path(temp)
+        tokenizer.save_pretrained(staging / "tokenizer")
+        train = TokenWriter(staging, "train", shard_tokens)
+        validation = TokenWriter(staging, "validation", shard_tokens)
+        identities = hashlib.sha256()
+        seen = 0
+        required = max_training_tokens + 1  # next-token lookahead
+        last_percent = -1
+        try:
+            while train.total < required:
+                batch = list(islice(documents, 128))
+                if not batch:
+                    raise ValueError(
+                        "Dataset exhausted before the requested budget; choose a larger dataset config"
+                    )
+                encoded = tokenizer([row["text"] for row in batch], add_special_tokens=False)["input_ids"]
+                for row, tokens in zip(batch, encoded):
+                    tokens = tokens + [tokenizer.eos_token_id]
+                    identity = str(row.get("id", row.get("url", seen)))
+                    identities.update(f"{seen}:{identity}\n".encode())
+                    if seen < validation_documents:
+                        validation.write(tokens)
+                    else:
+                        train.write(tokens[: required - train.total])
+                    seen += 1
+                    if train.total == required:
+                        break
+                percent = 100 * train.total // required
+                if percent > last_percent:
+                    print(
+                        f"Prepared {percent}% ({train.total:,}/{required:,} tokens, {seen:,} documents)",
+                        flush=True,
+                    )
+                    last_percent = percent
+        finally:
+            train_info, validation_info = train.finish(), validation.finish()
+        manifest = write_manifest(
+            staging,
+            {"train": train_info, "validation": validation_info},
+            dataset=dataset,
+            dataset_config=dataset_config,
+            dataset_revision=dataset_revision,
+            tokenizer=tokenizer_name,
+            tokenizer_revision=tokenizer_revision,
+            tokenizer_max_id=max(tokenizer.get_vocab().values()),
+            validation_documents=validation_documents,
+            documents_seen=seen,
+            document_order_sha256=identities.hexdigest(),
+            packing="continuous_document_stream_with_eos; shifted_targets; reset_positions_per_sequence",
+        )
+        staging.replace(output)
+        return manifest

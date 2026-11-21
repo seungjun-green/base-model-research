@@ -38,12 +38,19 @@ the shared embedding/readout uses constant initialization variance and LR plus
 the readout's `1 / width_multiplier` factor. Attention scale is the selected
 multiplier divided by head dimension. No second manual readout division is added.
 
-## Installation and first checks
+## Start in Colab
+
+Open notebook 00, select the RTX PRO 6000 runtime, and run all cells. Approve the
+Google Drive mount. Notebook 01 prepares the data on CPU. Use the GPU for notebooks
+02–06. [Open notebook 00 in Colab](https://colab.research.google.com/github/seungjun-green/base-model-research/blob/main/notebooks/00_setup_and_checks.ipynb) · [Notebook order and run controls](docs/COLAB.md)
+
+## Local installation and first checks
 
 Use Python 3.11+ and a dedicated environment. On the GPU machine install a
 CUDA-enabled PyTorch build that supports the installed Blackwell GPU and driver.
 `requirements.txt` pins direct dependencies; it is not a transitive lockfile.
-Colab saves the GitHub URL and commit once per experiment and restores recorded
+Colab uses this project's fixed GitHub URL and automatically records the current
+default-branch commit once per experiment. It restores that commit and the recorded
 packages on reconnect. The benchmark notebook installs its evaluation harness
 in a separate environment.
 
@@ -54,10 +61,6 @@ python -m pip install -r requirements.txt -e '.[data,eval,dev]'
 bmr check --device cpu
 python -m pytest -q
 ```
-
-Then use [the Colab workflow](docs/COLAB.md), starting with notebook 00. The
-notebooks create an isolated training environment so Colab's preinstalled optional
-audio/vision packages cannot interfere with Transformers imports.
 
 ## Shared data and search
 
@@ -86,8 +89,8 @@ all of FineWeb-Edu; inspect it before committing to the full experiment.
 
 The training corpus occupies approximately 47.83 GB in uint32, plus validation,
 tokenizer files, caches, and checkpoints. Use the runtime's SSD for active reads.
-Dataset preparation is staged and does not yet resume an incomplete preprocessing
-job. A completed corpus can be reused across training attempts.
+Rerun notebook 01 after an interruption. It reuses a completed corpus, retries
+tokenization from the beginning if necessary, and resumes a partial Drive copy.
 
 ## Main training
 
@@ -124,8 +127,8 @@ updated model weights, Adam optimizer state, schedule information, RNG state and
 training-token position. `checkpoints/latest.json` identifies the latest completed
 save by step and SHA-256 checksum. The final save includes the last optimizer update.
 
-On hosted Colab, approve the **Google Drive storage** cell. Checkpoints and
-results go to `My Drive/bmr/runs/experiment_003/`. Notebook 01 saves the shared
+On hosted Colab, approve the Drive mount in **Experiment storage**. Checkpoints and
+results go to `My Drive/bmr/runs/standard_vs_gated/`. Notebook 01 saves the shared
 corpus under `My Drive/bmr/data/` for use across runtimes. The proxy smoke run
 reads its shards directly from Drive. Full training reads a verified copy on
 the runtime SSD. See [storage guidance](docs/COLAB.md) for

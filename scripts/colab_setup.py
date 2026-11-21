@@ -6,26 +6,31 @@ import re
 import subprocess
 import sys
 
+GITHUB_REPO_URL = "https://github.com/seungjun-green/base-model-research"
+
 
 def _checkout(workspace, runs):
     source_file = runs / "source.json"
     if source_file.exists():
         source = json.loads(source_file.read_text())
+        if source["url"].rstrip("/").removesuffix(".git").lower() != GITHUB_REPO_URL.lower():
+            raise ValueError(
+                f"{runs} is already pinned to a different repository. Use a new EXPERIMENT name."
+            )
+        commit = source["commit"]
     else:
-        source = {
-            "url": input("GitHub repository HTTPS URL (saved for this experiment): ").strip(),
-            "commit": input("Full Git commit SHA: ").strip().lower(),
-        }
-    url, commit = source["url"], source["commit"]
-    if not re.fullmatch(r"https://github\.com/[\w.-]+/[\w.-]+/?", url):
-        raise ValueError("Use a GitHub HTTPS repository URL without credentials.")
+        head = subprocess.check_output(
+            ["git", "ls-remote", "--exit-code", GITHUB_REPO_URL, "HEAD"], text=True
+        )
+        commit = head.split()[0]
+        source = {"url": GITHUB_REPO_URL, "commit": commit}
     if not re.fullmatch(r"[0-9a-f]{40}", commit):
-        raise ValueError("Enter the full 40-character Git commit SHA.")
+        raise ValueError(f"Invalid Git commit for this experiment: {commit!r}")
 
     repo = workspace / "repos" / commit
     if not repo.exists():
         repo.parent.mkdir(parents=True, exist_ok=True)
-        subprocess.run(["git", "clone", "--", url, repo], check=True)
+        subprocess.run(["git", "clone", "--", GITHUB_REPO_URL, repo], check=True)
     if subprocess.check_output(["git", "status", "--porcelain"], cwd=repo, text=True).strip():
         raise RuntimeError(f"The runtime checkout has local edits: {repo}")
     if subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip() != commit:
