@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import shutil
@@ -53,8 +54,6 @@ def copy_prepared_data(source, destination):
         for split in ("train", "validation"):
             for shard in TokenCorpus(source, split).entries:
                 name = shard["path"]
-                if Path(name).name != name:
-                    raise ValueError(f"Expected a shard filename: {name}")
                 target = staging / name
                 if (
                     target.is_file()
@@ -71,16 +70,33 @@ def copy_prepared_data(source, destination):
         staging.replace(destination)
 
 
+class _CheckpointWriter:
+    """Hash PyTorch's serialized bytes as they are written to the checkpoint."""
+
+    def __init__(self, stream):
+        self.stream = stream
+        self.digest = hashlib.sha256()
+
+    def write(self, data):
+        count = self.stream.write(data)
+        self.digest.update(memoryview(data)[:count])
+        return count
+
+    def flush(self):
+        self.stream.flush()
+
+
 def _write_checkpoint(directory, payload, name):
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / name
     temporary = directory / (name + ".tmp")
     with open(temporary, "wb") as stream:
-        torch.save(payload, stream)
+        writer = _CheckpointWriter(stream)
+        torch.save(payload, writer)
         stream.flush()
         os.fsync(stream.fileno())
     temporary.replace(path)
-    return {"file": name, "sha256": file_sha256(path), "step": payload["step"]}
+    return {"file": name, "sha256": writer.digest.hexdigest(), "step": payload["step"]}
 
 
 def save_checkpoint(directory, payload, keep=2):

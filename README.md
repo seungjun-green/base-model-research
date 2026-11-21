@@ -65,7 +65,6 @@ python -m pytest -q
 ## Shared data and search
 
 ```bash
-bmr trials
 bmr prepare-data --output data/fineweb_edu
 bmr sweep --model configs/models/standard_proxy.yaml --data data/fineweb_edu --output runs/proxy
 bmr sweep --model configs/models/modified_proxy.yaml --data data/fineweb_edu --output runs/proxy
@@ -130,8 +129,8 @@ save by step and SHA-256 checksum. The final save includes the last optimizer up
 On hosted Colab, approve the Drive mount in **Experiment storage**. Checkpoints and
 results go to `My Drive/bmr/runs/standard_vs_gated/`. Notebook 01 saves the shared
 corpus under `My Drive/bmr/data/` for use across runtimes. The proxy smoke run
-reads its shards directly from Drive. Full training reads a verified copy on
-the runtime SSD. See [storage guidance](docs/COLAB.md) for
+reads its shards directly from Drive. Full training caches each shard on the
+runtime SSD the first time it needs that shard. See [storage guidance](docs/COLAB.md) for
 the notebook outputs and the optional self-hosted backup configuration.
 
 ## Evaluation

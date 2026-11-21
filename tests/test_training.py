@@ -26,6 +26,46 @@ def test_data_crosses_shards_and_masks_exact_tail(corpus):
     assert y[0, -1] == x[1, 0]
 
 
+def test_shard_cache_fetches_only_verified_shards_and_reuses_them(tmp_path, corpus):
+    source = TokenCorpus(corpus, "train")
+    cache = tmp_path / "cache"
+    data = TokenCorpus(corpus, "train", cache_dir=cache)
+    directory = cache / source.fingerprint
+    assert not directory.exists()
+    expected = source.read(29, 8)
+    assert np.array_equal(data.read(29, 8), expected)
+    names = [entry["path"] for entry in source.entries[:3]]
+    assert {p.name for p in directory.iterdir()} == set(names[:2])
+    (corpus / names[0]).unlink()
+    assert np.array_equal(TokenCorpus(corpus, "train", cache_dir=cache).read(29, 8), expected)
+
+    third = corpus / names[2]
+    original = third.read_bytes()
+    third.write_bytes(bytes(len(original)))
+    with pytest.raises(ValueError, match="verification"):
+        data.read(62, 1)
+    assert {p.name for p in directory.iterdir()} == set(names[:2])
+    third.write_bytes(original)
+    assert data.read(62, 1).tolist() == [62 % 8]
+
+
+def test_validation_checkpoint_hashes_once_and_detects_corruption(tmp_path, monkeypatch):
+    from base_model_research import storage
+    from base_model_research.data import file_sha256
+
+    payload = {"step": 5, "model": torch.arange(10000)}
+    with monkeypatch.context() as patch:
+        patch.setattr(storage, "file_sha256", lambda path: pytest.fail(f"Checkpoint reread: {path}"))
+        path = storage.save_validation_checkpoint(tmp_path, payload)
+    pointer = json.loads((tmp_path / "latest.json").read_text())
+    assert pointer["sha256"] == file_sha256(path)
+    torch.testing.assert_close(load_checkpoint(tmp_path)["model"], payload["model"])
+    with path.open("ab") as handle:
+        handle.write(b"corruption")
+    with pytest.raises(ValueError, match="checksum mismatch"):
+        load_checkpoint(tmp_path)
+
+
 @pytest.mark.parametrize("family", ["standard", "modified"])
 def test_proxy_restarts_at_seed_and_never_saves_weights(
     tmp_path, corpus, tiny_config, hp, training_config, family
@@ -71,24 +111,24 @@ def test_resume_rejects_changed_protocol(tmp_path, corpus, tiny_config, hp, trai
         train(tiny_config, hp, replace(training_config, seed=43), corpus, output, device="cpu", resume=True)
 
 
-def test_resuming_training_after_installing_benchmark_packages(
+def test_resume_checks_only_numerical_training_packages(
     tmp_path, corpus, tiny_config, hp, training_config, monkeypatch
 ):
     from base_model_research import training
 
-    packages = {"torch": "2.13.0", "mup": "1.0.0"}
+    packages = {"torch": "2.13.0", "mup": "1.0.0", "transformers": "5.14.0"}
     monkeypatch.setattr(
         training, "environment_report", lambda: {"packages": dict(packages), "git_commit": "fixture"}
     )
     output = tmp_path / "run"
     train(tiny_config, hp, training_config, corpus, output, device="cpu", stop_after_updates=1)
-    packages["lm_eval"] = "0.4.13"
+    packages.update({"lm_eval": "0.4.13", "datasets": "4.5.0", "transformers": "5.15.0"})
     assert (
         train(tiny_config, hp, training_config, corpus, output, device="cpu", resume=True)["status"]
         == "complete"
     )
     packages["torch"] = "2.12.0"
-    with pytest.raises(ValueError, match="package versions changed"):
+    with pytest.raises(ValueError, match="Resume requires torch==2.13.0"):
         train(tiny_config, hp, training_config, corpus, output, device="cpu", resume=True)
 
 
@@ -242,8 +282,12 @@ def test_main_resumes_exactly_after_interrupted_checkpoint(
         return update(model, optimizer, data, config, device, start, count)
 
     monkeypatch.setattr(training, "_optimizer_update", record_start)
-    result = train(cfg, hp, training_config, corpus, runs[1], device="cpu", resume=True)
+    # Resume on a fresh VM with an empty SSD shard cache.
+    cache = tmp_path / "fresh_cache"
+    result = train(cfg, hp, training_config, corpus, runs[1], device="cpu", resume=True, cache_dir=cache)
     assert starts[0] == latest["consumed_tokens"]
+    fetched = {path.name for path in cache.rglob("train-*.bin")}
+    assert fetched and "train-00000.bin" not in fetched
     assert result["status"] == "complete"
     assert len(list(directory.glob("*.pt"))) == 20
     expected, actual = [load_checkpoint(run / "checkpoints") for run in runs]

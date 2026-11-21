@@ -6,8 +6,8 @@ In hosted Colab, select **CPU** for notebook 01 and **RTX PRO 6000** for the
 other six notebooks. Run **Experiment storage** in each notebook and approve the Google Drive mount.
 The cell prints the experiment folder shared by all notebooks.
 
-Allow about 48 GB of local disk space for prepared tokens, plus room for caches
-and the Python environment. FP32 model weights, gradients, and two Adam moments
+Allow about 48 GB of runtime disk for corpus preparation or full main training,
+plus room for download caches. FP32 model weights, gradients, and two Adam moments
 occupy roughly 9.6 GB for a 0.6B model before activations, logits, and overhead.
 Each main-model checkpoint uses about 7.2 GB on Drive for the FP32 weights and
 two Adam moments. Budget about 144 GB per main model, or 288 GB for both, plus the corpus.
@@ -30,7 +30,7 @@ Setup uses Colab's current Python and keeps its installed PyTorch build. It
 installs the project in that runtime and reuses compatible dependencies. Notebook
 06 adds the evaluation harness. Run setup again when you connect to a fresh VM.
 Each training run records its package versions in `run.json`. To resume an
-existing run, use a runtime with matching training package versions. Older
+existing run, use the recorded PyTorch, NumPy, and μP versions. Older
 virtual-environment snapshots remain on Drive for reference.
 
 The default workspace is `/content/bmr` where `/content` exists, otherwise
@@ -73,9 +73,11 @@ the main run restarts from its seed.
 Hosted notebooks use `drive.mount("/content/drive")`. Keep `USE_GOOGLE_DRIVE = True`
 in the **Experiment storage** cell. Notebook 01 prepares the corpus on the runtime SSD, then copies the
 tokenizer, manifest, and verified shards to `My Drive/bmr/data/fineweb_edu/`
-(about 48 GB). On a fresh VM, the first full proxy or main run copies the corpus
-back to the SSD. Further full runs reuse that copy. Rerun the cell
-after an interrupted transfer to reuse the shards that passed verification.
+(about 48 GB). On a fresh VM, full training copies and verifies each shard
+when it first reads it. A full proxy search needs about 5.4 GB of training shards
+plus the validation split. Later trials on the same VM reuse those local files.
+A resumed main run fetches the shards it needs from its saved token position.
+If notebook 01 already prepared the full corpus on that VM, training uses it directly.
 If tokenization itself was interrupted, rerunning starts it again in a fresh temporary directory.
 Notebook 06 reads just the saved tokenizer.
 

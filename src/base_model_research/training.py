@@ -172,6 +172,7 @@ def train(
     remote=None,
     selection=None,
     progress=None,
+    cache_dir=None,
 ):
     """Train once over the assigned token budget, checkpointing main runs at every validation."""
     config.require_schedule()
@@ -196,6 +197,7 @@ def train(
             remote,
             selection,
             progress,
+            cache_dir,
         )
 
 
@@ -211,9 +213,10 @@ def _train_locked(
     remote,
     selection,
     progress,
+    cache_dir,
 ):
-    corpus = TokenCorpus(data_dir, "train")
-    validation = TokenCorpus(data_dir, "validation")
+    corpus = TokenCorpus(data_dir, "train", cache_dir=cache_dir)
+    validation = TokenCorpus(data_dir, "validation", cache_dir=cache_dir)
     if corpus.manifest.get("tokenizer_max_id", 0) >= model_config.vocab_size:
         raise ValueError("Prepared tokenizer has token IDs outside the model vocabulary")
     checkpoint_dir = run_dir / "checkpoints"
@@ -258,12 +261,14 @@ def _train_locked(
             raise ValueError("Resume refused: model, hyperparameters, training settings, or dataset changed")
         if is_main and metadata.get("checkpoint_format") != 3:
             raise ValueError("This run predates per-validation checkpoints. Use a new main run directory.")
-        # Notebook 06 can add the evaluation harness to the shared Colab runtime.
+        # Training reads prepared token IDs and uses only these numerical packages.
         previous_packages = metadata["environment"]["packages"]
         current_packages = initial_environment["packages"]
-        training_packages = (previous_packages.keys() | current_packages.keys()) - {"lm_eval"}
-        if any(previous_packages.get(key) != current_packages.get(key) for key in training_packages):
-            raise ValueError("Resume refused: package versions changed; recreate the recorded environment")
+        for package in ("torch", "mup", "numpy"):
+            previous = previous_packages.get(package)
+            current = current_packages.get(package)
+            if previous != current:
+                raise ValueError(f"Resume requires {package}=={previous}. This runtime has {current}.")
         if metadata["environment"]["git_commit"] != initial_environment["git_commit"]:
             raise ValueError("Resume refused: repository commit changed")
         initial_environment = metadata["environment"]

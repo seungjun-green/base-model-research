@@ -55,18 +55,22 @@ BOOTSTRAP = """
 
 TRAINING_LAUNCHER = """
     # Training runs in a subprocess of the same Python; tqdm renders in the notebook.
-    from importlib.util import find_spec
-    if find_spec("tqdm") is None:
-        subprocess.run([sys.executable, "-m", "pip", "install", "tqdm>=4.66,<5"], check=True)
     sys.path.insert(0, str(REPO / "src"))
     from base_model_research.progress import run_with_progress
 
     def training_data(*, local_copy=True):
         if not (SAVED_DATA / "manifest.json").is_file():
             raise FileNotFoundError(f"Run notebook 01 to prepare the shared dataset at {SAVED_DATA}.")
-        if local_copy and SAVED_DATA != DATA:
-            run("copy-data", "--source", SAVED_DATA, "--destination", DATA)
-        return DATA if local_copy else SAVED_DATA
+        if not local_copy or SAVED_DATA == DATA:
+            return ["--data", SAVED_DATA]
+        if not (DATA / "manifest.json").is_file():
+            from inspect import signature
+            from base_model_research.data import TokenCorpus
+            if "cache_dir" in signature(TokenCorpus).parameters:
+                return ["--data", SAVED_DATA, "--cache-dir", DATA.parent / "cached_shards"]
+        # Reuse the prepared SSD corpus, or stage it for an older pinned trainer.
+        run("copy-data", "--source", SAVED_DATA, "--destination", DATA)
+        return ["--data", DATA]
 
     def run_training(command_name, model_name, run_record, *arguments):
         # Existing runs keep their settings. New runs use the profile from 00 or the training config.
@@ -130,7 +134,6 @@ notebook(
         subprocess.run(["nvidia-smi"], check=True)
         run("environment", "--output", RUNS / "environment.json")
         run("check", "--device", "cpu", "--output", RUNS / "checks.json")
-        run("trials")
     """),
         markdown(
             "Run these GPU diagnostics before full sweeps. Inspect activation magnitudes across widths "
@@ -187,9 +190,9 @@ for family, number in (("standard", "02"), ("modified", "03")):
             code(f"""
             FAMILY_RUNS = RUNS / "proxy" / "{family}"
 
-            def run_proxy(data, *options):
+            def run_proxy(data_options, *options):
                 run_training("sweep", "{family}_proxy", FAMILY_RUNS / "protocol.json",
-                    "--data", data, "--output", RUNS / "proxy", *options)
+                    *data_options, "--output", RUNS / "proxy", *options)
         """),
             code("""
             # Smoke run · one proxy model, up to 10 optimizer updates
@@ -245,7 +248,7 @@ for family, number, proxy_number in (("standard", "04", "02"), ("modified", "05"
                                         f"and finish the {family} proxy search to create {{WINNER}}.")
             options = ["--resume"] if (OUTPUT / "run.json").exists() else []
             run_training("train", "{family}_main", OUTPUT / "run.json", "--hyperparameters", WINNER,
-                "--data", training_data(), "--output", OUTPUT, *options)
+                *training_data(), "--output", OUTPUT, *options)
         '''),
         ],
         training=True,

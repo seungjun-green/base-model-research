@@ -2,11 +2,12 @@
 
 import hashlib
 import json
+import shutil
 from bisect import bisect_right
 from collections import OrderedDict
 from itertools import islice
 from pathlib import Path
-from tempfile import TemporaryDirectory
+from tempfile import NamedTemporaryFile, TemporaryDirectory
 
 import numpy as np
 import torch
@@ -71,7 +72,7 @@ def write_manifest(root, splits, **metadata):
 
 
 class TokenCorpus:
-    def __init__(self, root, split, verify=False):
+    def __init__(self, root, split, verify=False, *, cache_dir=None):
         self.root = Path(root)
         self.manifest = json.loads((self.root / "manifest.json").read_text())
         raw = {k: v for k, v in self.manifest.items() if k != "fingerprint"}
@@ -86,8 +87,14 @@ class TokenCorpus:
         if self.starts[-1] != self.total_tokens or self.total_tokens < 2:
             raise ValueError("Invalid or empty token corpus")
         self._maps = OrderedDict()
+        self.cache_dir = Path(cache_dir) / expected if cache_dir is not None else None
         for entry in self.entries:
-            path = self.root / entry["path"]
+            name = entry["path"]
+            if not name or Path(name).name != name or name == "..":
+                raise ValueError(f"Expected a shard filename: {name}")
+            if self.cache_dir is not None and not verify:
+                continue  # Validate these shards as they are copied on first use.
+            path = self._shard_path(entry)
             if path.stat().st_size != entry["tokens"] * 4:
                 raise ValueError(f"Shard size mismatch: {path}")
             if verify and file_sha256(path) != entry["sha256"]:
@@ -97,6 +104,26 @@ class TokenCorpus:
     def fingerprint(self):
         return self.manifest["fingerprint"]
 
+    def _shard_path(self, entry):
+        source = self.root / entry["path"]
+        if self.cache_dir is None:
+            return source
+        target = self.cache_dir / entry["path"]
+        size = entry["tokens"] * 4
+        if target.is_file() and target.stat().st_size == size:
+            return target
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        with NamedTemporaryFile(dir=self.cache_dir, suffix=".tmp", delete=False) as stream:
+            temporary = Path(stream.name)
+        try:
+            shutil.copyfile(source, temporary)
+            if temporary.stat().st_size != size or file_sha256(temporary) != entry["sha256"]:
+                raise ValueError(f"Copied shard failed verification: {source}")
+            temporary.replace(target)
+        finally:
+            temporary.unlink(missing_ok=True)
+        return target
+
     def read(self, start, count):
         if start < 0 or count < 0 or start + count > self.total_tokens:
             raise ValueError("Requested tokens outside the prepared corpus")
@@ -105,7 +132,7 @@ class TokenCorpus:
         while written < count:
             idx = bisect_right(self.starts, start) - 1
             if idx not in self._maps:
-                self._maps[idx] = np.memmap(self.root / self.entries[idx]["path"], dtype="<u4", mode="r")
+                self._maps[idx] = np.memmap(self._shard_path(self.entries[idx]), dtype="<u4", mode="r")
             self._maps.move_to_end(idx)
             while len(self._maps) > 2:
                 self._maps.popitem(last=False)

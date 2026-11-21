@@ -145,6 +145,7 @@ def sweep(
     stop_after_updates=None,
     remote=None,
     progress=None,
+    cache_dir=None,
 ):
     manifest = load_trials(trials_path)
     end = len(manifest["trials"]) if end is None else end
@@ -155,7 +156,7 @@ def sweep(
         {
             "model": asdict(model_config),
             "training": asdict(training),
-            "data_fingerprint": TokenCorpus(data_dir, "train").fingerprint,
+            "data_fingerprint": TokenCorpus(data_dir, "train", cache_dir=cache_dir).fingerprint,
         }
     )
     manifest_path = root / "trial_manifest.json"
@@ -205,6 +206,7 @@ def sweep(
                 stop_after_updates=stop_after_updates,
                 remote=f"{remote.rstrip('/')}/{model_config.family}/{trial['id']}" if remote else None,
                 progress=progress,
+                cache_dir=cache_dir,
             )
             summarize(root, manifest, model_config.family)
             if result["status"] in ("paused", "interrupted"):

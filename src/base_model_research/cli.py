@@ -45,6 +45,9 @@ def main():
         if name == "profile":
             continue
         p.add_argument("--data", required=True)
+        p.add_argument(
+            "--cache-dir", help="Local SSD directory for verified token shards copied on first use"
+        )
         p.add_argument("--stop-after-updates", type=int)
         p.add_argument(
             "--progress-events", action="store_true", help="Stream counters for notebook progress bars"
@@ -153,6 +156,7 @@ def main():
                 args.stop_after_updates,
                 args.remote,
                 progress=emit_progress if args.progress_events else None,
+                cache_dir=args.cache_dir,
             )
         else:
             from .progress import emit_progress
@@ -173,7 +177,10 @@ def main():
                         raise ValueError(f"Main/proxy training protocol mismatch: {key}")
                 from .data import TokenCorpus
 
-                if TokenCorpus(args.data, "train").fingerprint != saved["data_fingerprint"]:
+                if (
+                    TokenCorpus(args.data, "train", cache_dir=args.cache_dir).fingerprint
+                    != saved["data_fingerprint"]
+                ):
                     raise ValueError("Main run must use the same prepared dataset as proxy selection")
                 if model.at_width(1) != ModelConfig(**saved["model"]):
                     raise ValueError("Main model does not match the selected proxy's architecture family")
@@ -189,6 +196,7 @@ def main():
                 args.remote,
                 selection=saved if "selection" in saved else None,
                 progress=emit_progress if args.progress_events else None,
+                cache_dir=args.cache_dir,
             )
             print(json.dumps(result, indent=2))
             if result["status"] == "diverged":

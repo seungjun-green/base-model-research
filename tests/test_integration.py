@@ -99,6 +99,8 @@ def test_main_cli_transfers_winner_and_records_provenance(
             str(winner_path),
             "--data",
             str(corpus),
+            "--cache-dir",
+            str(tmp_path / "cache"),
             "--output",
             str(output),
             "--device",
@@ -106,6 +108,7 @@ def test_main_cli_transfers_winner_and_records_provenance(
         ],
     )
     main()
+    assert list((tmp_path / "cache" / winner["data_fingerprint"]).glob("validation-*.bin"))
     checkpoint = load_checkpoint(output / "checkpoints")
     result = json.loads((output / "result.json").read_text())
     assert result["consumed_tokens"] == checkpoint["identity"]["token_budget"]
@@ -286,8 +289,6 @@ def test_colab_uses_kernel_python_and_preserves_torch(tmp_path, monkeypatch, ben
 def test_proxy_notebook_smoke_then_full_uses_the_same_trial(
     tmp_path, corpus, tiny_config, training_config, family
 ):
-    import shutil
-
     notebook = next(Path("notebooks").glob(f"*_{family}_proxy_search.ipynb"))
     cells = [cell["source"] for cell in json.loads(notebook.read_text())["cells"]]
     search = tmp_path / "search.yaml"
@@ -302,7 +303,8 @@ def test_proxy_notebook_smoke_then_full_uses_the_same_trial(
         assert command[command.index("--microbatch-size") + 1] == "2"
         assert "--activation-checkpointing" not in command
         data = Path(command[command.index("--data") + 1])
-        paths.append(data)
+        cache = Path(command[command.index("--cache-dir") + 1]) if "--cache-dir" in command else None
+        paths.append((data, cache))
         limited = "--stop-after-updates" in command
         sweep(
             replace(tiny_config, family=family),
@@ -311,6 +313,7 @@ def test_proxy_notebook_smoke_then_full_uses_the_same_trial(
             command[command.index("--output") + 1],
             trials,
             device="cpu",
+            cache_dir=cache,
             stop_after_updates=int(command[command.index("--stop-after-updates") + 1]) if limited else None,
         )
 
@@ -324,7 +327,7 @@ def test_proxy_notebook_smoke_then_full_uses_the_same_trial(
         "RUN_SMOKE": True,
         "RUN_FULL": True,
         "run_with_progress": run_with_progress,
-        "run": lambda *args: shutil.copytree(corpus, cached),
+        "run": lambda *args: pytest.fail(f"Unexpected whole-corpus copy: {args}"),
     }
 
     def run_cell(marker):
@@ -342,11 +345,12 @@ def test_proxy_notebook_smoke_then_full_uses_the_same_trial(
     paused = json.loads(result_path.read_text())
     assert paused["status"] == "paused" and paused["step"] == 10
     assert paused["checkpoint"] is None
-    assert paths == [corpus] and not cached.exists()
+    assert paths == [(corpus, None)] and not (tmp_path / "cached_shards").exists()
     profile.write_text(json.dumps({"training": {"microbatch_size": 1, "activation_checkpointing": True}}))
     run_cell("if RUN_FULL:")
     finished = json.loads(result_path.read_text())
-    assert paths == [corpus, cached] and finished["status"] == "complete"
+    assert paths == [(corpus, None), (corpus, tmp_path / "cached_shards")]
+    assert finished["status"] == "complete" and not cached.exists()
     assert paused["fingerprint"] == finished["fingerprint"]
     assert not list(env["FAMILY_RUNS"].rglob("*.pt"))
     assert (env["FAMILY_RUNS"] / "best_hparams.json").is_file()
