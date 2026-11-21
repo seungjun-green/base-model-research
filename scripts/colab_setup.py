@@ -1,0 +1,105 @@
+"""Standard-library setup embedded in the notebooks so it can run before the checkout exists."""
+
+import fcntl
+import json
+import re
+import subprocess
+import sys
+
+
+def _checkout(workspace, runs):
+    source_file = runs / "source.json"
+    if source_file.exists():
+        source = json.loads(source_file.read_text())
+    else:
+        source = {
+            "url": input("GitHub repository HTTPS URL (saved for this experiment): ").strip(),
+            "commit": input("Full Git commit SHA: ").strip().lower(),
+        }
+    url, commit = source["url"], source["commit"]
+    if not re.fullmatch(r"https://github\.com/[\w.-]+/[\w.-]+/?", url):
+        raise ValueError("Use a GitHub HTTPS repository URL without credentials.")
+    if not re.fullmatch(r"[0-9a-f]{40}", commit):
+        raise ValueError("Enter the full 40-character Git commit SHA.")
+
+    repo = workspace / "repos" / commit
+    if not repo.exists():
+        repo.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["git", "clone", "--", url, repo], check=True)
+    if subprocess.check_output(["git", "status", "--porcelain"], cwd=repo, text=True).strip():
+        raise RuntimeError(f"The runtime checkout has local edits: {repo}")
+    if subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip() != commit:
+        subprocess.run(["git", "fetch", "origin", commit], cwd=repo, check=True)
+        subprocess.run(["git", "checkout", "--detach", commit], cwd=repo, check=True)
+    if not source_file.exists():
+        temporary = source_file.with_suffix(".tmp")
+        temporary.write_text(json.dumps(source, indent=2) + "\n")
+        temporary.replace(source_file)
+    return repo
+
+
+def _snapshot_pins(text):
+    # Earlier notebooks included the editable checkout. Reinstall it from the saved commit.
+    pins = []
+    comment = ""
+    for line in text.splitlines():
+        if line.startswith("#"):
+            comment = line
+            continue
+        if line.startswith("-e ") and re.search(r"(?i)base[-_]model[-_]research\b", line + " " + comment):
+            comment = ""
+            continue
+        if line.strip():
+            pins.append(line)
+        comment = ""
+    return "\n".join(sorted(pins)) + "\n"
+
+
+def _installed_pins(pip):
+    frozen = subprocess.check_output([*pip, "freeze", "--exclude", "base-model-research"], text=True)
+    return _snapshot_pins(frozen)
+
+
+def _uses_checkout(pip, repo):
+    packages = subprocess.check_output(
+        [*pip, "list", "--editable", "--format=json", "--disable-pip-version-check"], text=True
+    )
+    return any(
+        package["name"] == "base-model-research" and package.get("editable_project_location") == str(repo)
+        for package in json.loads(packages)
+    )
+
+
+def setup_colab(workspace, runs, *, benchmark):
+    runs.mkdir(parents=True, exist_ok=True)
+    with (runs / ".setup.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        repo = _checkout(workspace, runs)
+        role = "benchmark" if benchmark else "training"
+        venv = workspace / "envs" / runs.name / repo.name / role
+        python = venv / "bin" / "python"
+        if not python.exists():
+            subprocess.run([sys.executable, "-m", "venv", venv], check=True)
+
+        pip = [python, "-m", "pip"]
+        snapshot = runs / ("requirements.benchmark.freeze.txt" if benchmark else "requirements.freeze.txt")
+        if snapshot.exists():
+            pins = _snapshot_pins(snapshot.read_text())
+            if _uses_checkout(pip, repo) and _installed_pins(pip) == pins:
+                return repo, python
+            requirements = venv / "recorded-requirements.txt"
+            requirements.write_text(pins)
+        else:
+            pins = None
+            requirements = repo / ("requirements.txt" if benchmark else "requirements-train.txt")
+            if not requirements.exists():  # Older pinned revisions used a single requirements file.
+                requirements = repo / "requirements.txt"
+        subprocess.run([*pip, "install", "-r", requirements, "-e", repo], check=True)
+        frozen = _installed_pins(pip)
+        if pins is None:
+            temporary = snapshot.with_suffix(".tmp")
+            temporary.write_text(frozen)
+            temporary.replace(snapshot)
+        elif frozen != pins:
+            raise RuntimeError(f"The installed {role} packages differ from {snapshot}.")
+    return repo, python

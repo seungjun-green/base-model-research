@@ -1,0 +1,17 @@
+context_length: 2048
+global_batch_size: 128
+microbatch_size: 4
+tokens_per_parameter: 20
+seed: 42
+# Selected by the user during implementation, 2026-11-12.
+warmup_fraction: 0.01
+min_lr_ratio: 0.1
+betas: [0.9, 0.95]
+eps: 1.0e-8
+weight_decay: 0.0
+grad_clip: 1.0
+precision: bf16
+validations_per_run: 20
+log_interval: 10
+loss_chunk_size: 128
+activation_checkpointing: false

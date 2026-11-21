@@ -1,0 +1,354 @@
+{
+  "fingerprint": "5f98c271e58bfcd4a97298ada497c7e84af801dc20771f5ad2f35967f8dd2dcb",
+  "format_version": 1,
+  "rng": "numpy.PCG64",
+  "settings": {
+    "ranges": {
+      "attention_multiplier": [
+        0.25,
+        4
+      ],
+      "embedding_multiplier": [
+        0.1,
+        10
+      ],
+      "init_multiplier": [
+        0.1,
+        10
+      ],
+      "learning_rate": [
+        0.0001,
+        0.1
+      ],
+      "output_multiplier": [
+        0.25,
+        4
+      ]
+    },
+    "sampling": "log_uniform",
+    "seed": 42,
+    "trials": 32
+  },
+  "trials": [
+    {
+      "hyperparameters": {
+        "attention_multiplier": 0.3245942596378771,
+        "embedding_multiplier": 5.214297905300549,
+        "init_multiplier": 0.754669641079693,
+        "learning_rate": 0.020983027299866144,
+        "output_multiplier": 1.7284419080291054
+      },
+      "id": "trial_000"
+    },
+    {
+      "hyperparameters": {
+        "attention_multiplier": 0.871482591932436,
+        "embedding_multiplier": 3.733607072503034,
+        "init_multiplier": 3.3287363915578405,
+        "learning_rate": 0.0845020130213907,
+        "output_multiplier": 0.3566187667665699
+      },
+      "id": "trial_001"
+    },
+    {
+      "hyperparameters": {
+        "attention_multiplier": 0.8547988044492624,
+        "embedding_multiplier": 1.9396806804067672,
+        "init_multiplier": 7.137234690401979,
+        "learning_rate": 0.0012953707094821838,
+        "output_multiplier": 2.4470548732837627
+      },
+      "id": "trial_002"
+    },
+    {
+      "hyperparameters": {
+        "attention_multiplier": 1.4405878048730019,
+        "embedding_multiplier": 0.13416354101688915,
+        "init_multiplier": 1.285788609210467,
+        "learning_rate": 0.00048052519691574633,
+        "output_multiplier": 2.4803172925085364
+      },
+      "id": "trial_003"
+    },
+    {
+      "hyperparameters": {
+        "attention_multiplier": 2.163750253020504,
+        "embedding_multiplier": 8.73767825544199,
+        "init_multiplier": 0.5117430300313628,
+        "learning_rate": 0.018804561916113512,
+        "output_multiplier": 2.9741645839718345
+      },
+      "id": "trial_004"
+    },
+    {
+      "hyperparameters": {
+        "attention_multiplier": 1.661165498236602,
+        "embedding_multiplier": 0.12235100233650856,
+        "init_multiplier": 0.8579105479001717,
+        "learning_rate": 0.00038363314625091923,
+        "output_multiplier": 0.3834626499626295
+      },
+      "id": "trial_005"
+    },
+    {
+      "hyperparameters": {
+        "attention_multiplier": 0.9190550886357959,
+        "embedding_multiplier": 0.44838462907863524,
+        "init_multiplier": 8.610323423725239,
+        "learning_rate": 0.017150882346504807,
+        "output_multiplier": 0.6982612531110706
+      },
+      "id": "trial_006"
+    },
+    {
+      "hyperparameters": {
+        "attention_multiplier": 1.6013137186983835,
+        "embedding_multiplier": 0.8941489120323662,
+        "init_multiplier": 0.18190431896729697,
+        "learning_rate": 0.0003701809599112696,
+        "output_multiplier": 0.4689927078407784
+      },
+      "id": "trial_007"
+    },
+    {
+      "hyperparameters": {
+        "attention_multiplier": 2.512353035150544,
+        "embedding_multiplier": 2.5149549152136506,
+        "init_multiplier": 4.627606177115527,
+        "learning_rate": 0.0020485933406128153,
+        "output_multiplier": 0.5943837443086348
+      },
+      "id": "trial_008"
+    },
+    {
+      "hyperparameters": {
+        "attention_multiplier": 0.36831445766874776,
+        "embedding_multiplier": 0.37727341902695966,
+        "init_multiplier": 0.59560283744694,
+        "learning_rate": 0.025959305683261862,
+        "output_multiplier": 1.658618415779389
+      },
+      "id": "trial_009"
+    },
+    {
+      "hyperparameters": {
+        "attention_multiplier": 1.7662156643574973,
+        "embedding_multiplier": 3.748424389563134,
+        "init_multiplier": 0.10344858139522892,
+        "learning_rate": 0.0003978548049127215,
+        "output_multiplier": 1.5794293735710079
+      },
+      "id": "trial_010"
+    },
+    {
+      "hyperparameters": {
+        "attention_multiplier": 0.34343769352964054,
+        "embedding_multiplier": 1.3724053168927632,
+        "init_multiplier": 0.8276210937283391,
+        "learning_rate": 0.02198806909748979,
+        "output_multiplier": 0.36835991801073464
+      },
+      "id": "trial_011"
+    },
+    {
+      "hyperparameters": {
+        "attention_multiplier": 1.4528374331059823,
+        "embedding_multiplier": 1.3504304218264758,
+        "init_multiplier": 0.8753715188811556,
+        "learning_rate": 0.010120661170730882,
+        "output_multiplier": 2.0849249168059423
+      },
+      "id": "trial_012"
+    },
+    {
+      "hyperparameters": {
+        "attention_multiplier": 0.8390737677760007,
+        "embedding_multiplier": 0.40541535749001745,
+        "init_multiplier": 1.3134523488159873,
+        "learning_rate": 0.0045786579640486645,
+        "output_multiplier": 0.27230046256986884
+      },
+      "id": "trial_013"
+    },
+    {
+      "hyperparameters": {
+        "attention_multiplier": 0.2938620507083455,
+        "embedding_multiplier": 5.091035747757647,
+        "init_multiplier": 0.6562318236263225,
+        "learning_rate": 0.0004403054067781242,
+        "output_multiplier": 0.4782238355332725
+      },
+      "id": "trial_014"
+    },
+    {
+      "hyperparameters": {
+        "attention_multiplier": 2.1970882759812254,
+        "embedding_multiplier": 2.1078176143715988,
+        "init_multiplier": 0.3865338349256126,
+        "learning_rate": 0.0006984763022713542,
+        "output_multiplier": 1.171314593660567
+      },
+      "id": "trial_015"
+    },
+    {
+      "hyperparameters": {
+        "attention_multiplier": 0.2662490517971069,
+        "embedding_multiplier": 4.246594269178859,
+        "init_multiplier": 0.6497910464896941,
+        "learning_rate": 0.009838765758022786,
+        "output_multiplier": 0.3971873773223123
+      },
+      "id": "trial_016"
+    },
+    {
+      "hyperparameters": {
+        "attention_multiplier": 1.0029009312500843,
+        "embedding_multiplier": 0.8389855104787757,
+        "init_multiplier": 2.7843171420276387,
+        "learning_rate": 0.00018627028640471943,
+        "output_multiplier": 0.39095842860373425
+      },
+      "id": "trial_017"
+    },
+    {
+      "hyperparameters": {
+        "attention_multiplier": 0.5767621342548187,
+        "embedding_multiplier": 0.7803915372354437,
+        "init_multiplier": 2.4696803719805227,
+        "learning_rate": 0.0002863757952026767,
+        "output_multiplier": 0.7190105798394906
+      },
+      "id": "trial_018"
+    },
+    {
+      "hyperparameters": {
+        "attention_multiplier": 3.598986419062304,
+        "embedding_multiplier": 0.14972690198018482,
+        "init_multiplier": 0.5292065625346755,
+        "learning_rate": 0.007777638962486086,
+        "output_multiplier": 0.34676341672594657
+      },
+      "id": "trial_019"
+    },
+    {
+      "hyperparameters": {
+        "attention_multiplier": 2.16595551963431,
+        "embedding_multiplier": 0.3402043974160324,
+        "init_multiplier": 2.508500937206449,
+        "learning_rate": 0.05317923335242437,
+        "output_multiplier": 3.672354952003908
+      },
+      "id": "trial_020"
+    },
+    {
+      "hyperparameters": {
+        "attention_multiplier": 3.05338516162184,
+        "embedding_multiplier": 0.3503346743332184,
+        "init_multiplier": 0.7919960293789889,
+        "learning_rate": 0.014147202418743067,
+        "output_multiplier": 0.32659256402923886
+      },
+      "id": "trial_021"
+    },
+    {
+      "hyperparameters": {
+        "attention_multiplier": 0.40812730273255693,
+        "embedding_multiplier": 0.40917891678108576,
+        "init_multiplier": 0.2539374356348187,
+        "learning_rate": 0.002329854872457913,
+        "output_multiplier": 1.2456323136389973
+      },
+      "id": "trial_022"
+    },
+    {
+      "hyperparameters": {
+        "attention_multiplier": 1.4232956402659491,
+        "embedding_multiplier": 2.747425418417031,
+        "init_multiplier": 3.2888120853467466,
+        "learning_rate": 0.03714008148792371,
+        "output_multiplier": 0.8283843246495498
+      },
+      "id": "trial_023"
+    },
+    {
+      "hyperparameters": {
+        "attention_multiplier": 0.2805746739986198,
+        "embedding_multiplier": 0.14753281949461175,
+        "init_multiplier": 1.9938533076381364,
+        "learning_rate": 0.005653194226354681,
+        "output_multiplier": 0.7918118747708662
+      },
+      "id": "trial_024"
+    },
+    {
+      "hyperparameters": {
+        "attention_multiplier": 1.275071623574873,
+        "embedding_multiplier": 0.19455767948316172,
+        "init_multiplier": 0.45679613923184675,
+        "learning_rate": 0.0030336987857336336,
+        "output_multiplier": 0.3330041059271257
+      },
+      "id": "trial_025"
+    },
+    {
+      "hyperparameters": {
+        "attention_multiplier": 1.2866877315662935,
+        "embedding_multiplier": 1.4525205298476924,
+        "init_multiplier": 7.083375039486975,
+        "learning_rate": 0.00032492184125318077,
+        "output_multiplier": 0.6540528940905446
+      },
+      "id": "trial_026"
+    },
+    {
+      "hyperparameters": {
+        "attention_multiplier": 0.31445380538642326,
+        "embedding_multiplier": 0.9217366875216193,
+        "init_multiplier": 8.262632301463919,
+        "learning_rate": 0.00011706083377588761,
+        "output_multiplier": 2.190015239443165
+      },
+      "id": "trial_027"
+    },
+    {
+      "hyperparameters": {
+        "attention_multiplier": 0.9291333698626996,
+        "embedding_multiplier": 7.510224336900761,
+        "init_multiplier": 0.9581069460475697,
+        "learning_rate": 0.0028838654399998,
+        "output_multiplier": 1.2200262672987492
+      },
+      "id": "trial_028"
+    },
+    {
+      "hyperparameters": {
+        "attention_multiplier": 0.2654382747412877,
+        "embedding_multiplier": 1.0998787335882116,
+        "init_multiplier": 0.46040284081499955,
+        "learning_rate": 0.0006323055434023888,
+        "output_multiplier": 0.8441936258222452
+      },
+      "id": "trial_029"
+    },
+    {
+      "hyperparameters": {
+        "attention_multiplier": 0.3378144543893596,
+        "embedding_multiplier": 0.19076477207874415,
+        "init_multiplier": 6.198998677224931,
+        "learning_rate": 0.0301214429454555,
+        "output_multiplier": 1.1616251339055537
+      },
+      "id": "trial_030"
+    },
+    {
+      "hyperparameters": {
+        "attention_multiplier": 2.1061233997088857,
+        "embedding_multiplier": 2.083748352112704,
+        "init_multiplier": 0.3651468577334505,
+        "learning_rate": 0.010392505885279636,
+        "output_multiplier": 1.8764143734832295
+      },
+      "id": "trial_031"
+    }
+  ]
+}

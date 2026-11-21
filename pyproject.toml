@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "base-model-research"
+version = "0.1.0"
+description = "Reproducible Qwen3-style residual and gated decoder experiments with muP"
+requires-python = ">=3.11"
+dependencies = ["torch>=2.7,<3", "mup==1.0.0", "numpy>=1.26,<3", "PyYAML>=6,<7"]
+
+[project.optional-dependencies]
+data = ["transformers>=4.51,<6", "datasets>=3,<5", "huggingface-hub>=0.30,<2"]
+eval = ["lm_eval[hf]==0.4.13"]
+dev = ["pytest>=8,<10", "ruff>=0.11"]
+
+[project.scripts]
+bmr = "base_model_research.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 110
+

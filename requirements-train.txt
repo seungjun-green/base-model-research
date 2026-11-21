@@ -1,0 +1,8 @@
+# Direct pins for preparation and training. Colab records the resolved dependencies on Drive.
+torch==2.13.0
+mup==1.0.0
+numpy==2.1.2
+PyYAML==6.0.3
+transformers==5.15.0
+datasets==4.5.0
+huggingface-hub==1.27.0

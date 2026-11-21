@@ -1,0 +1,114 @@
+from dataclasses import replace
+
+import pytest
+import torch
+from torch.nn import functional as F
+
+from base_model_research.diagnostics import check_parameter_counts
+from base_model_research.models import parameter_count
+from base_model_research.parameterization import build_model, make_optimizer
+
+
+def test_all_four_exact_parameter_counts():
+    counts = check_parameter_counts()
+    assert counts["standard_main"]["parameters"] == 596_049_920
+    assert counts["modified_main"]["parameters"] == 597_884_928
+
+
+@pytest.mark.parametrize("family", ["standard", "modified"])
+def test_causal_and_tied(tiny_config, hp, family):
+    model = build_model(replace(tiny_config, family=family, n_layers=2), hp).eval()
+    assert model.embedding.weight is model.readout.weight
+    x = torch.tensor([[1, 2, 3, 4, 5]])
+    changed = x.clone()
+    changed[:, 3:] = 0
+    torch.testing.assert_close(model(x)[:, :3], model(changed)[:, :3], rtol=0, atol=0)
+    assert parameter_count(model) == sum(p.numel() for p in model.parameters())
+
+
+def test_modified_equations_and_first_layer(tiny_config, hp):
+    model = build_model(replace(tiny_config, family="modified", n_layers=2), hp)
+    x = torch.randn(1, 3, 4)
+    a_previous, f_previous = None, None
+    for layer in model.layers:
+        a = layer.attention(layer.input_norm(x))
+        attention_previous = x if a_previous is None else a_previous
+        h = a + F.gelu(F.linear(x, layer.attention_gate.current.weight)) * F.linear(
+            attention_previous, layer.attention_gate.previous.weight
+        )
+        f = layer.ffn(layer.post_attention_norm(h))
+        ffn_previous = h if f_previous is None else f_previous
+        expected = f + F.gelu(F.linear(h, layer.ffn_gate.current.weight)) * F.linear(
+            ffn_previous, layer.ffn_gate.previous.weight
+        )
+        actual, actual_a, actual_f = layer(x, a_previous, f_previous)
+        torch.testing.assert_close(actual, expected)
+        torch.testing.assert_close(actual_a, a)
+        torch.testing.assert_close(actual_f, f)
+        x, a_previous, f_previous = expected, a, f
+
+
+def test_previous_block_branch_is_differentiable(tiny_config, hp):
+    model = build_model(replace(tiny_config, family="modified"), hp)
+    layer = model.layers[0]
+    x = torch.randn(1, 2, 4, requires_grad=True)
+    previous_a = torch.randn_like(x, requires_grad=True)
+    previous_f = torch.randn_like(x, requires_grad=True)
+    result, _, _ = layer(x, previous_a, previous_f)
+    result.square().sum().backward()
+    assert previous_a.grad.abs().sum() > 0
+    assert previous_f.grad.abs().sum() > 0
+
+
+@pytest.mark.parametrize("family", ["standard", "modified"])
+def test_chunked_loss_and_gradients_match_full_logits(tiny_config, hp, family):
+    cfg = replace(tiny_config, family=family, n_layers=2)
+    model = build_model(cfg, hp)
+    reference = build_model(cfg, hp)
+    reference.load_state_dict(model.state_dict())
+    x = torch.tensor([[1, 2, 3, 4], [2, 3, 4, 5]])
+    y = torch.tensor([[2, 3, 4, 5], [3, 4, -100, -100]])
+    full = F.cross_entropy(reference(x).reshape(-1, 8), y.reshape(-1), reduction="sum")
+    chunked = model.loss_sum(x, y, chunk_size=3)
+    torch.testing.assert_close(chunked, full)
+    full.backward()
+    chunked.backward()
+    for actual, expected in zip(model.parameters(), reference.parameters()):
+        torch.testing.assert_close(actual.grad, expected.grad, atol=1e-6, rtol=1e-5)
+
+
+@pytest.mark.parametrize("family", ["standard", "modified"])
+def test_activation_checkpointing_gradients(tiny_config, hp, family):
+    cfg = replace(tiny_config, family=family, n_layers=2)
+    a, b = build_model(cfg, hp), build_model(cfg, hp)
+    b.load_state_dict(a.state_dict())
+    b.activation_checkpointing = True
+    x = torch.tensor([[1, 2, 3, 4]])
+    a.loss_sum(x, x, 3).backward()
+    b.loss_sum(x, x, 3).backward()
+    for p, q in zip(a.parameters(), b.parameters()):
+        torch.testing.assert_close(p.grad, q.grad)
+
+
+def test_mup_lr_groups_and_shared_output_scaling(tiny_config, hp, training_config):
+    proxy = build_model(tiny_config, hp)
+    main = build_model(tiny_config.at_width(4), hp)
+    optimizer = make_optimizer(main, training_config)
+    rates = {id(p): g["lr"] for g in optimizer.param_groups for p in g["params"]}
+    assert rates[id(main.layers[0].ffn.up_proj.weight)] == hp.learning_rate / 4
+    assert rates[id(main.embedding.weight)] == hp.learning_rate
+    assert main.layers[0].attention.q_norm.weight.infshape.ninf() == 1
+    hidden = torch.randn(1, 2, main.config.d_model)
+    expected = F.linear(hidden, main.embedding.weight) * hp.output_multiplier / 4
+    torch.testing.assert_close(main.readout(hidden), expected)
+    assert proxy.readout.width_mult() == 1
+
+
+def test_modified_gates_are_hidden_mup_weights(tiny_config, hp, training_config):
+    model = build_model(replace(tiny_config, family="modified").at_width(4), hp)
+    optimizer = make_optimizer(model, training_config)
+    rates = {id(p): g["lr"] for g in optimizer.param_groups for p in g["params"]}
+    for name, parameter in model.named_parameters():
+        if "_gate." in name:
+            assert parameter.infshape.ninf() == 2
+            assert rates[id(parameter)] == hp.learning_rate / 4

@@ -1,0 +1,8 @@
+family: modified
+d_model: 256
+n_layers: 28
+n_heads: 12
+n_kv_heads: 6
+head_dim: 32
+d_ff: 560
+base_d_ff: 560

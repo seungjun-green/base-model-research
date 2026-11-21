@@ -1,0 +1,7 @@
+Architecture reference: Qwen3 from the Hugging Face Transformers project,
+Copyright 2025 The Qwen team, Alibaba Group and HuggingFace Inc.; Apache-2.0.
+https://github.com/huggingface/transformers/tree/main/src/transformers/models/qwen3
+
+This repository implements the architecture equations using PyTorch and uses
+the separately installed microsoft/mup library (MIT) and LM Evaluation Harness
+(MIT). Their licenses remain with their respective distributions.

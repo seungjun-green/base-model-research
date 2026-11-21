@@ -1,0 +1,9 @@
+seed: 42
+trials: 32
+sampling: log_uniform
+ranges:
+  learning_rate: [0.0001, 0.1]
+  init_multiplier: [0.1, 10]
+  embedding_multiplier: [0.1, 10]
+  output_multiplier: [0.25, 4]
+  attention_multiplier: [0.25, 4]

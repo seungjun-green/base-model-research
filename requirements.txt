@@ -1,0 +1,4 @@
+# Full environment, including the evaluation harness used by notebook 06.
+-r requirements-train.txt
+lm_eval[hf]==0.4.13
+

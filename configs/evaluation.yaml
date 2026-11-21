@@ -1,0 +1,18 @@
+# Explicit initial evaluation protocol: all seven tasks are zero-shot.
+# MMLU fewshot=5 may be chosen BEFORE evaluation, but all models must use the same setting.
+max_length: 2048
+precision: bf16
+bootstrap_iters: 1000
+tasks:
+  - {name: hellaswag, fewshot: 0}
+  - {name: piqa, fewshot: 0}
+  - {name: arc_easy, fewshot: 0}
+  - {name: winogrande, fewshot: 0}
+  - {name: openbookqa, fewshot: 0}
+  - {name: mmlu, fewshot: 0}
+  - {name: lambada_openai, fewshot: 0}
+references:
+  qwen3_0.6b_base: Qwen/Qwen3-0.6B-Base
+  qwen2.5_0.5b: Qwen/Qwen2.5-0.5B
+  smollm2_360m: HuggingFaceTB/SmolLM2-360M
+
