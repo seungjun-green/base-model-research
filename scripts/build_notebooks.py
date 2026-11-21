@@ -22,7 +22,9 @@ def code(text):
 
 
 STORAGE = code("""
-    #@title Experiment storage
+    # Experiment storage
+    USE_GOOGLE_DRIVE = True
+
     from pathlib import Path
     import os
 
@@ -30,7 +32,6 @@ STORAGE = code("""
     WORKSPACE = Path(os.environ.get("BMR_WORKSPACE", default_workspace)).expanduser().resolve()
     EXPERIMENT = "standard_vs_gated"
     DATA = WORKSPACE / "data" / "fineweb_edu"
-    USE_GOOGLE_DRIVE = True  #@param {type:"boolean"}
     if USE_GOOGLE_DRIVE:
         from google.colab import drive
         drive.mount("/content/drive")
@@ -86,7 +87,7 @@ TRAINING_LAUNCHER = """
 def notebook(name, title, cells, *, controls=None, training=False, benchmark=False, gpu=True):
     setup = (ROOT / "scripts" / "colab_setup.py").read_text()
     bootstrap = (
-        "#@title Set up experiment runtime\n"
+        "# Set up experiment runtime\n"
         + setup
         + f"\nREPO, PYTHON = setup_colab(WORKSPACE, RUNS, benchmark={benchmark})\n"
         + textwrap.dedent(BOOTSTRAP)
@@ -191,7 +192,7 @@ for family, number in (("standard", "02"), ("modified", "03")):
                     "--data", data, "--output", RUNS / "proxy", *options)
         """),
             code("""
-            #@title Smoke run · one proxy model, up to 10 optimizer updates
+            # Smoke run · one proxy model, up to 10 optimizer updates
             if RUN_SMOKE:
                 run_proxy(training_data(local_copy=False), "--start", 0, "--end", 1, "--stop-after-updates", 10)
                 result = json.loads((FAMILY_RUNS / "trial_000" / "result.json").read_text())
@@ -200,7 +201,7 @@ for family, number in (("standard", "02"), ("modified", "03")):
                 print("Smoke run disabled.")
         """),
             code("""
-            #@title Full run · all 32 trials
+            # Full run · all 32 trials
             if RUN_FULL:
                 run_proxy(training_data())
                 winner = FAMILY_RUNS / "best_hparams.json"
@@ -216,9 +217,9 @@ for family, number in (("standard", "02"), ("modified", "03")):
         ],
         training=True,
         controls=code("""
-            #@title Run controls
-            RUN_SMOKE = True   #@param {type:"boolean"}
-            RUN_FULL = False   #@param {type:"boolean"}
+            # Run controls
+            RUN_SMOKE = True
+            RUN_FULL = False
             # Smoke tests 10 updates of trial 000. Proxy trials save metrics only.
             # Full starts unfinished trials from their seed and skips completed trials.
             # Enabling both runs smoke first, then full. Disabling both skips training.

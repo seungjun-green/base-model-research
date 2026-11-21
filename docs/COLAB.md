@@ -48,10 +48,10 @@ reopens the saved experiment. All notebooks launch the same Python package.
 6. `05_train_modified_main.ipynb`: transfer the modified winning settings.
 7. `06_benchmarks.ipynb`: run the five-model comparison.
 
-In notebooks 02 and 03, choose the checkboxes in **Run controls**, then run all cells.
+In notebooks 02 and 03, edit `RUN_SMOKE` and `RUN_FULL` directly in the **Run controls** cell, then run all cells.
 The default enables only `RUN_SMOKE`, which tests trial 000 for up to ten optimizer
 updates. Smoke reads the needed token shards directly from the corpus saved by
-notebook 01. For the full search, clear `RUN_SMOKE` and enable `RUN_FULL`. The full search
+notebook 01. For the full search, set `RUN_SMOKE = False` and `RUN_FULL = True`. The full search
 starts trial 000 again at step zero. Enabling both runs them in order.
 
 Notebooks 02–05 display a tqdm bar for optimizer updates with training loss, tokens
@@ -69,8 +69,8 @@ the main run restarts from its seed.
 
 ## Google Drive
 
-Hosted notebooks use `drive.mount("/content/drive")`. Leave **USE_GOOGLE_DRIVE**
-checked. Notebook 01 prepares the corpus on the runtime SSD, then copies the
+Hosted notebooks use `drive.mount("/content/drive")`. Keep `USE_GOOGLE_DRIVE = True`
+in the **Experiment storage** cell. Notebook 01 prepares the corpus on the runtime SSD, then copies the
 tokenizer, manifest, and verified shards to `My Drive/bmr/data/fineweb_edu/`
 (about 48 GB). On a fresh VM, the first full proxy or main run copies the corpus
 back to the SSD. Further full runs reuse that copy. Rerun the cell
@@ -97,7 +97,7 @@ To reuse one from a different experiment, set `WINNER` to its `best_hparams.json
 shared corpus and verify each winner's training settings and dataset fingerprint.
 Earlier weights-only files can still be evaluated with their original protocol.
 
-For a self-hosted runtime, clear **USE_GOOGLE_DRIVE** and choose a persistent
+For a self-hosted runtime with local storage, set `USE_GOOGLE_DRIVE = False` and choose a persistent
 `BMR_WORKSPACE`. Command-line users with an authenticated `rclone` remote
 can use `bmr train --remote`, `bmr sweep --remote`, or `bmr sync` for backups.
 
