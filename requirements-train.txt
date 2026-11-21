@@ -1,4 +1,4 @@
-# Direct pins for preparation and training. Colab records the resolved dependencies on Drive.
+# Direct pins for local installation and CI. Colab uses its runtime's PyTorch.
 torch==2.13.0
 mup==1.0.0
 numpy==2.1.2

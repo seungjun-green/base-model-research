@@ -1,4 +1,5 @@
 import json
+import sys
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -256,30 +257,29 @@ def test_notebook_cells_are_valid_python_and_have_no_saved_outputs():
                 compile(cell["source"], str(path), "exec")
 
 
-def test_colab_recovers_when_venv_cannot_seed_pip(tmp_path, monkeypatch):
+@pytest.mark.parametrize(("benchmark", "extras"), [(False, "data"), (True, "data,eval")])
+def test_colab_uses_kernel_python_and_preserves_torch(tmp_path, monkeypatch, benchmark, extras):
     import runpy
     import subprocess
-    from venv import EnvBuilder
+    from unittest.mock import Mock
 
-    def missing_ensurepip(*args):
-        raise RuntimeError("ensurepip unavailable")
+    setup = runpy.run_path("scripts/colab_setup.py")["setup_colab"]
+    repo, runs = tmp_path / "checkout", tmp_path / "existing_experiment"
+    runs.mkdir()
+    snapshot = runs / "requirements.freeze.txt"
+    snapshot.write_text("torch==2.13.0\n")
+    monkeypatch.setitem(setup.__globals__, "_checkout", lambda workspace, runs: repo)
+    monkeypatch.setitem(setup.__globals__, "version", lambda name: "2.12.0+cu130")
+    install = Mock()
+    monkeypatch.setattr(subprocess, "run", install)
 
-    monkeypatch.setattr(EnvBuilder, "_setup_pip", missing_ensurepip)
-    monkeypatch.delenv("PYTHONPATH", raising=False)
-    directory = tmp_path / "training"
-    with pytest.raises(RuntimeError, match="ensurepip unavailable"):
-        EnvBuilder(with_pip=True, symlinks=True).create(directory)
-    assert (directory / "bin" / "python").is_file()
-
-    setup = runpy.run_path("scripts/colab_setup.py")
-    python, pip = setup["_prepare_venv"](directory)
-    assert subprocess.check_output([python, "-c", "import sys; print(sys.prefix)"], text=True).strip() == str(
-        directory
-    )
-    assert (
-        json.loads(subprocess.check_output([*pip, "list", "--format=json", "--disable-pip-version-check"]))
-        == []
-    )
+    assert setup(tmp_path, runs, benchmark=benchmark) == repo
+    install.assert_called_once()
+    (command,) = install.call_args.args
+    assert command[:4] == [sys.executable, "-m", "pip", "install"]
+    assert "torch==2.12.0+cu130" in command and command[-1] == f"{repo}[{extras}]"
+    assert "-r" not in command and "--upgrade" not in command
+    assert snapshot.read_text() == "torch==2.13.0\n" and not (tmp_path / "envs").exists()
 
 
 @pytest.mark.parametrize("family", ["standard", "modified"])
@@ -319,7 +319,7 @@ def test_proxy_notebook_smoke_then_full_uses_the_same_trial(
         "SAVED_DATA": corpus,
         "DATA": cached,
         "REPO": Path("."),
-        "PYTHON": "python",
+        "sys": sys,
         "json": json,
         "RUN_SMOKE": True,
         "RUN_FULL": True,

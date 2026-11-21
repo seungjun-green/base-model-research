@@ -258,7 +258,11 @@ def _train_locked(
             raise ValueError("Resume refused: model, hyperparameters, training settings, or dataset changed")
         if is_main and metadata.get("checkpoint_format") != 3:
             raise ValueError("This run predates per-validation checkpoints. Use a new main run directory.")
-        if metadata["environment"]["packages"] != initial_environment["packages"]:
+        # Notebook 06 can add the evaluation harness to the shared Colab runtime.
+        previous_packages = metadata["environment"]["packages"]
+        current_packages = initial_environment["packages"]
+        training_packages = (previous_packages.keys() | current_packages.keys()) - {"lm_eval"}
+        if any(previous_packages.get(key) != current_packages.get(key) for key in training_packages):
             raise ValueError("Resume refused: package versions changed; recreate the recorded environment")
         if metadata["environment"]["git_commit"] != initial_environment["git_commit"]:
             raise ValueError("Resume refused: repository commit changed")

@@ -5,7 +5,7 @@ import json
 import re
 import subprocess
 import sys
-from venv import EnvBuilder
+from importlib.metadata import PackageNotFoundError, version
 
 GITHUB_REPO_URL = "https://github.com/seungjun-green/base-model-research"
 
@@ -44,71 +44,30 @@ def _checkout(workspace, runs):
     return repo
 
 
-def _snapshot_pins(text):
-    # Earlier notebooks included the editable checkout. Reinstall it from the saved commit.
-    pins = []
-    comment = ""
-    for line in text.splitlines():
-        if line.startswith("#"):
-            comment = line
-            continue
-        if line.startswith("-e ") and re.search(r"(?i)base[-_]model[-_]research\b", line + " " + comment):
-            comment = ""
-            continue
-        if line.strip():
-            pins.append(line)
-        comment = ""
-    return "\n".join(sorted(pins)) + "\n"
-
-
-def _installed_pins(pip):
-    frozen = subprocess.check_output([*pip, "freeze", "--exclude", "base-model-research"], text=True)
-    return _snapshot_pins(frozen)
-
-
-def _uses_checkout(pip, repo):
-    packages = subprocess.check_output(
-        [*pip, "list", "--editable", "--format=json", "--disable-pip-version-check"], text=True
-    )
-    return any(
-        package["name"] == "base-model-research" and package.get("editable_project_location") == str(repo)
-        for package in json.loads(packages)
-    )
-
-
-def _prepare_venv(directory):
-    # Colab's system Python can lack ensurepip. Finish partial environments in place.
-    EnvBuilder(symlinks=True, with_pip=False).create(directory)
-    python = directory / "bin" / "python"
-    return python, [sys.executable, "-m", "pip", "--python", str(python)]
-
-
 def setup_colab(workspace, runs, *, benchmark):
     runs.mkdir(parents=True, exist_ok=True)
     with (runs / ".setup.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         repo = _checkout(workspace, runs)
-        role = "benchmark" if benchmark else "training"
-        venv = workspace / "envs" / runs.name / repo.name / role
-        python, pip = _prepare_venv(venv)
-        snapshot = runs / ("requirements.benchmark.freeze.txt" if benchmark else "requirements.freeze.txt")
-        if snapshot.exists():
-            pins = _snapshot_pins(snapshot.read_text())
-            if _uses_checkout(pip, repo) and _installed_pins(pip) == pins:
-                return repo, python
-            requirements = venv / "recorded-requirements.txt"
-            requirements.write_text(pins)
-        else:
-            pins = None
-            requirements = repo / ("requirements.txt" if benchmark else "requirements-train.txt")
-            if not requirements.exists():  # Older pinned revisions used a single requirements file.
-                requirements = repo / "requirements.txt"
-        subprocess.run([*pip, "install", "pip", "-r", requirements, "-e", repo], check=True)
-        frozen = _installed_pins(pip)
-        if pins is None:
-            temporary = snapshot.with_suffix(".tmp")
-            temporary.write_text(frozen)
-            temporary.replace(snapshot)
-        elif frozen != pins:
-            raise RuntimeError(f"The installed {role} packages differ from {snapshot}.")
-    return repo, python
+        try:
+            torch_version = version("torch")
+        except PackageNotFoundError as error:
+            raise RuntimeError("Select a Colab runtime with PyTorch installed and rerun setup.") from error
+
+        # Keep the runtime's PyTorch build, including its CUDA version suffix.
+        extras = "data,eval" if benchmark else "data"
+        print(f"Using {sys.executable} with PyTorch {torch_version}", flush=True)
+        subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pip",
+                "install",
+                "--quiet",
+                f"torch=={torch_version}",
+                "-e",
+                f"{repo}[{extras}]",
+            ],
+            check=True,
+        )
+    return repo

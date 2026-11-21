@@ -71,6 +71,27 @@ def test_resume_rejects_changed_protocol(tmp_path, corpus, tiny_config, hp, trai
         train(tiny_config, hp, replace(training_config, seed=43), corpus, output, device="cpu", resume=True)
 
 
+def test_resuming_training_after_installing_benchmark_packages(
+    tmp_path, corpus, tiny_config, hp, training_config, monkeypatch
+):
+    from base_model_research import training
+
+    packages = {"torch": "2.13.0", "mup": "1.0.0"}
+    monkeypatch.setattr(
+        training, "environment_report", lambda: {"packages": dict(packages), "git_commit": "fixture"}
+    )
+    output = tmp_path / "run"
+    train(tiny_config, hp, training_config, corpus, output, device="cpu", stop_after_updates=1)
+    packages["lm_eval"] = "0.4.13"
+    assert (
+        train(tiny_config, hp, training_config, corpus, output, device="cpu", resume=True)["status"]
+        == "complete"
+    )
+    packages["torch"] = "2.12.0"
+    with pytest.raises(ValueError, match="package versions changed"):
+        train(tiny_config, hp, training_config, corpus, output, device="cpu", resume=True)
+
+
 def test_schedule_preserves_group_ratios_and_endpoints():
     parameters = [torch.nn.Parameter(torch.ones(1)), torch.nn.Parameter(torch.ones(1))]
     optimizer = torch.optim.Adam(

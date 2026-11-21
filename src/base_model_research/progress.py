@@ -1,4 +1,4 @@
-"""Forward training counters from the isolated Python process to the notebook kernel."""
+"""Forward training counters from the training subprocess to the notebook kernel."""
 
 import json
 import signal

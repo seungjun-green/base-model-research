@@ -44,15 +44,15 @@ Open notebook 00, select the RTX PRO 6000 runtime, and run all cells. Approve th
 Google Drive mount. Notebook 01 prepares the data on CPU. Use the GPU for notebooks
 02–06. [Open notebook 00 in Colab](https://colab.research.google.com/github/seungjun-green/base-model-research/blob/main/notebooks/00_setup_and_checks.ipynb) · [Notebook order and run controls](docs/COLAB.md)
 
+All seven notebooks use the selected Colab runtime's Python and PyTorch. Setup
+installs the project and its dependencies into that runtime. Notebook 06 also
+installs the evaluation harness. The Git commit is saved once per experiment.
+
 ## Local installation and first checks
 
 Use Python 3.11+ and a dedicated environment. On the GPU machine install a
 CUDA-enabled PyTorch build that supports the installed Blackwell GPU and driver.
 `requirements.txt` pins direct dependencies; it is not a transitive lockfile.
-Colab uses this project's fixed GitHub URL and automatically records the current
-default-branch commit once per experiment. It restores that commit and the recorded
-packages on reconnect. The benchmark notebook installs its evaluation harness
-in a separate environment.
 
 ```bash
 python -m venv .venv

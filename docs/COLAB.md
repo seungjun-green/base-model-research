@@ -26,18 +26,17 @@ The first setup in a new experiment saves the current commit of the repository's
 default branch in `source.json` on Drive. Later notebooks and fresh runtimes reuse
 that commit automatically. Use a new `EXPERIMENT` name to pick up a newer revision.
 
-Notebooks 00–05 share an isolated data and training environment. Notebook 06
-installs the evaluation harness in its own environment. Setup uses the runtime's
-pip to install into each environment. If creating an environment was interrupted,
-rerun the updated setup cell in the same workspace. On a fresh runtime,
-setup automatically installs the versions saved in `requirements.freeze.txt`
-for training or `requirements.benchmark.freeze.txt` for evaluation. Existing
-experiments with the older combined training snapshot restore that package set.
+Setup uses Colab's current Python and keeps its installed PyTorch build. It
+installs the project in that runtime and reuses compatible dependencies. Notebook
+06 adds the evaluation harness. Run setup again when you connect to a fresh VM.
+Each training run records its package versions in `run.json`. To resume an
+existing run, use a runtime with matching training package versions. Older
+virtual-environment snapshots remain on Drive for reference.
 
 The default workspace is `/content/bmr` where `/content` exists, otherwise
 `~/bmr-workspace`. On a local/remote runtime choose a persistent SSD directory.
-The hosted runtime can be replaced between notebooks. The checkout, virtual
-environment and local dataset cache are disposable. Mounting Drive again
+The hosted runtime can be replaced between notebooks. The checkout, installed
+packages and local dataset cache are disposable. Mounting Drive again
 reopens the saved experiment. All notebooks launch the same Python package.
 
 ## Notebook order

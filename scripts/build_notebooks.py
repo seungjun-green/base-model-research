@@ -48,13 +48,13 @@ STORAGE = code("""
 
 BOOTSTRAP = """
     def run(*arguments):
-        subprocess.run([str(PYTHON), "-m", "base_model_research.cli", *map(str, arguments)],
+        subprocess.run([sys.executable, "-m", "base_model_research.cli", *map(str, arguments)],
                        cwd=REPO, check=True)
 """
 
 
 TRAINING_LAUNCHER = """
-    # tqdm renders in the notebook kernel while training uses the isolated environment.
+    # Training runs in a subprocess of the same Python; tqdm renders in the notebook.
     from importlib.util import find_spec
     if find_spec("tqdm") is None:
         subprocess.run([sys.executable, "-m", "pip", "install", "tqdm>=4.66,<5"], check=True)
@@ -77,7 +77,7 @@ TRAINING_LAUNCHER = """
             memory_options = ["--microbatch-size", str(settings["microbatch_size"])]
             if settings["activation_checkpointing"]:
                 memory_options.append("--activation-checkpointing")
-        command = [str(PYTHON), "-u", "-m", "base_model_research.cli", command_name,
+        command = [sys.executable, "-u", "-m", "base_model_research.cli", command_name,
                    "--model", f"configs/models/{model_name}.yaml", *map(str, arguments),
                    *memory_options, "--progress-events"]
         run_with_progress(command, cwd=REPO)
@@ -89,7 +89,7 @@ def notebook(name, title, cells, *, controls=None, training=False, benchmark=Fal
     bootstrap = (
         "# Set up experiment runtime\n"
         + setup
-        + f"\nREPO, PYTHON = setup_colab(WORKSPACE, RUNS, benchmark={benchmark})\n"
+        + f"\nREPO = setup_colab(WORKSPACE, RUNS, benchmark={benchmark})\n"
         + textwrap.dedent(BOOTSTRAP)
     )
     if training:
