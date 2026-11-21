@@ -27,7 +27,9 @@ default branch in `source.json` on Drive. Later notebooks and fresh runtimes reu
 that commit automatically. Use a new `EXPERIMENT` name to pick up a newer revision.
 
 Notebooks 00–05 share an isolated data and training environment. Notebook 06
-installs the evaluation harness in its own environment. On a fresh runtime,
+installs the evaluation harness in its own environment. Setup uses the runtime's
+pip to install into each environment. If creating an environment was interrupted,
+rerun the updated setup cell in the same workspace. On a fresh runtime,
 setup automatically installs the versions saved in `requirements.freeze.txt`
 for training or `requirements.benchmark.freeze.txt` for evaluation. Existing
 experiments with the older combined training snapshot restore that package set.

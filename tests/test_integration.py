@@ -256,6 +256,32 @@ def test_notebook_cells_are_valid_python_and_have_no_saved_outputs():
                 compile(cell["source"], str(path), "exec")
 
 
+def test_colab_recovers_when_venv_cannot_seed_pip(tmp_path, monkeypatch):
+    import runpy
+    import subprocess
+    from venv import EnvBuilder
+
+    def missing_ensurepip(*args):
+        raise RuntimeError("ensurepip unavailable")
+
+    monkeypatch.setattr(EnvBuilder, "_setup_pip", missing_ensurepip)
+    monkeypatch.delenv("PYTHONPATH", raising=False)
+    directory = tmp_path / "training"
+    with pytest.raises(RuntimeError, match="ensurepip unavailable"):
+        EnvBuilder(with_pip=True, symlinks=True).create(directory)
+    assert (directory / "bin" / "python").is_file()
+
+    setup = runpy.run_path("scripts/colab_setup.py")
+    python, pip = setup["_prepare_venv"](directory)
+    assert subprocess.check_output([python, "-c", "import sys; print(sys.prefix)"], text=True).strip() == str(
+        directory
+    )
+    assert (
+        json.loads(subprocess.check_output([*pip, "list", "--format=json", "--disable-pip-version-check"]))
+        == []
+    )
+
+
 @pytest.mark.parametrize("family", ["standard", "modified"])
 def test_proxy_notebook_smoke_then_full_uses_the_same_trial(
     tmp_path, corpus, tiny_config, training_config, family

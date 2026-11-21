@@ -5,6 +5,7 @@ import json
 import re
 import subprocess
 import sys
+from venv import EnvBuilder
 
 GITHUB_REPO_URL = "https://github.com/seungjun-green/base-model-research"
 
@@ -75,6 +76,13 @@ def _uses_checkout(pip, repo):
     )
 
 
+def _prepare_venv(directory):
+    # Colab's system Python can lack ensurepip. Finish partial environments in place.
+    EnvBuilder(symlinks=True, with_pip=False).create(directory)
+    python = directory / "bin" / "python"
+    return python, [sys.executable, "-m", "pip", "--python", str(python)]
+
+
 def setup_colab(workspace, runs, *, benchmark):
     runs.mkdir(parents=True, exist_ok=True)
     with (runs / ".setup.lock").open("a") as lock:
@@ -82,11 +90,7 @@ def setup_colab(workspace, runs, *, benchmark):
         repo = _checkout(workspace, runs)
         role = "benchmark" if benchmark else "training"
         venv = workspace / "envs" / runs.name / repo.name / role
-        python = venv / "bin" / "python"
-        if not python.exists():
-            subprocess.run([sys.executable, "-m", "venv", venv], check=True)
-
-        pip = [python, "-m", "pip"]
+        python, pip = _prepare_venv(venv)
         snapshot = runs / ("requirements.benchmark.freeze.txt" if benchmark else "requirements.freeze.txt")
         if snapshot.exists():
             pins = _snapshot_pins(snapshot.read_text())
@@ -99,7 +103,7 @@ def setup_colab(workspace, runs, *, benchmark):
             requirements = repo / ("requirements.txt" if benchmark else "requirements-train.txt")
             if not requirements.exists():  # Older pinned revisions used a single requirements file.
                 requirements = repo / "requirements.txt"
-        subprocess.run([*pip, "install", "-r", requirements, "-e", repo], check=True)
+        subprocess.run([*pip, "install", "pip", "-r", requirements, "-e", repo], check=True)
         frozen = _installed_pins(pip)
         if pins is None:
             temporary = snapshot.with_suffix(".tmp")
