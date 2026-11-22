@@ -369,6 +369,28 @@ def test_proxy_notebook_smoke_finishes_one_trial_and_full_skips_it(
     assert (family_runs / "best_hparams.json").is_file()
 
 
+def test_pinned_trainer_without_shard_cache_can_start_one_trial_directly(
+    tmp_path, corpus, monkeypatch, capsys
+):
+    from base_model_research import data
+
+    path = Path("notebooks/02_standard_proxy_search.ipynb")
+    cells = json.loads(path.read_text())["cells"]
+    setup = next(cell["source"] for cell in cells if "def training_data(" in cell["source"])
+    local = tmp_path / "ssd"
+    copies = []
+    env = {"SAVED_DATA": corpus, "DATA": local, "run": lambda *args: copies.append(args)}
+    exec(setup[setup.index("def training_data(") :], env)  # noqa: S102 - generated notebook functions
+    monkeypatch.setattr(data, "TokenCorpus", lambda root, split: None)  # Signature before --cache-dir.
+
+    assert env["training_data"](single_proxy_trial=True) == ["--data", corpus]
+    assert not copies
+    assert "directly from Google Drive" in capsys.readouterr().out
+    assert env["training_data"]() == ["--data", local]
+    assert copies == [("copy-data", "--source", corpus, "--destination", local)]
+    assert "about 48 GB" in capsys.readouterr().out
+
+
 def test_changed_sweep_stops_before_starting_next_trial(tmp_path, corpus, training_config, tiny_config):
     trials = tmp_path / "trials.json"
     generate_trials("configs/search.yaml", trials)

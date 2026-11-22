@@ -58,7 +58,8 @@ TRAINING_LAUNCHER = """
     sys.path.insert(0, str(REPO / "src"))
     from base_model_research.progress import run_with_progress
 
-    def training_data():
+    def training_data(*, single_proxy_trial=False):
+        print(f"Checking the prepared dataset at {SAVED_DATA}…", flush=True)
         if not (SAVED_DATA / "manifest.json").is_file():
             raise FileNotFoundError(f"Run notebook 01 to prepare the shared dataset at {SAVED_DATA}.")
         if SAVED_DATA == DATA:
@@ -67,13 +68,22 @@ TRAINING_LAUNCHER = """
             from inspect import signature
             from base_model_research.data import TokenCorpus
             if "cache_dir" in signature(TokenCorpus).parameters:
+                print("Training will cache each shard on the runtime SSD when it is first read.", flush=True)
                 return ["--data", SAVED_DATA, "--cache-dir", DATA.parent / "cached_shards"]
-        # Reuse the prepared SSD corpus, or stage it for an older pinned trainer.
+            if single_proxy_trial:
+                print("Reading the shards for trial 000 directly from Google Drive.", flush=True)
+                return ["--data", SAVED_DATA]
+            print("This experiment's saved code copies the full dataset (about 48 GB) "
+                  "from Drive to the runtime SSD before training.", flush=True)
+            print(f"To check the copy in the Colab Terminal: du -sh '{DATA}.copying'", flush=True)
+        else:
+            print("Checking the prepared copy on the runtime SSD…", flush=True)
         run("copy-data", "--source", SAVED_DATA, "--destination", DATA)
         return ["--data", DATA]
 
     def run_training(command_name, model_name, run_record, *arguments):
         # Existing runs keep their settings. New runs use the profile from 00 or the training config.
+        print(f"Reading saved settings for {model_name}…", flush=True)
         settings_file = run_record if run_record.is_file() else RUNS / f"{model_name}_profile.json"
         memory_options = []
         if settings_file.is_file():
@@ -84,6 +94,8 @@ TRAINING_LAUNCHER = """
         command = [sys.executable, "-u", "-m", "base_model_research.cli", command_name,
                    "--model", f"configs/models/{model_name}.yaml", *map(str, arguments),
                    *memory_options, "--progress-events"]
+        print(f"Launching {model_name}. The update bar appears after the trainer checks "
+              "saved runs and initializes the model.", flush=True)
         run_with_progress(command, cwd=REPO)
 """
 
@@ -262,14 +274,15 @@ for family, number in (("standard", "02"), ("modified", "03")):
             code(f"""
             FAMILY_RUNS = RUNS / "proxy" / "{family}"
 
-            def run_proxy(*options):
+            def run_proxy(*, first_only=False):
+                options = ["--end", 1] if first_only else []
                 run_training("sweep", "{family}_proxy", FAMILY_RUNS / "protocol.json",
-                    *training_data(), "--output", RUNS / "proxy", *options)
+                    *training_data(single_proxy_trial=first_only), "--output", RUNS / "proxy", *options)
         """),
             code("""
             # Smoke run · train trial 000 on 20 tokens per parameter
             if RUN_SMOKE:
-                run_proxy("--end", 1)
+                run_proxy(first_only=True)
                 result = json.loads((FAMILY_RUNS / "trial_000" / "result.json").read_text())
                 print(f"Trial 000 is {result['status']} at step {result['step']}.")
             else:

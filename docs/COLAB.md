@@ -76,6 +76,9 @@ when it first reads it. A full proxy search needs about 5.4 GB of training shard
 plus the validation split. Later trials on the same VM reuse those local files.
 A resumed main run fetches the shards it needs from its saved token position.
 If notebook 01 already prepared the full corpus on that VM, training uses it directly.
+With an older pinned trainer that lacks shard caching, the single proxy trial reads
+from mounted Drive on a fresh VM. A full sweep or main run copies the corpus to
+the SSD first. The notebook prints which path it takes before launching training.
 If tokenization itself was interrupted, rerunning starts it again in a fresh temporary directory.
 Notebook 06 reads just the saved tokenizer.
 
