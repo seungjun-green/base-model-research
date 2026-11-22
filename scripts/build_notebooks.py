@@ -58,7 +58,7 @@ TRAINING_LAUNCHER = """
     sys.path.insert(0, str(REPO / "src"))
     from base_model_research.progress import run_with_progress
 
-    def training_data(*, single_proxy_trial=False):
+    def training_data(*, proxy=False):
         print(f"Checking the prepared dataset at {SAVED_DATA}…", flush=True)
         if not (SAVED_DATA / "manifest.json").is_file():
             raise FileNotFoundError(f"Run notebook 01 to prepare the shared dataset at {SAVED_DATA}.")
@@ -70,8 +70,8 @@ TRAINING_LAUNCHER = """
             if "cache_dir" in signature(TokenCorpus).parameters:
                 print("Training will cache each shard on the runtime SSD when it is first read.", flush=True)
                 return ["--data", SAVED_DATA, "--cache-dir", DATA.parent / "cached_shards"]
-            if single_proxy_trial:
-                print("Reading the shards for trial 000 directly from Google Drive.", flush=True)
+            if proxy:
+                print("Reading proxy training and validation shards directly from Google Drive.", flush=True)
                 return ["--data", SAVED_DATA]
             print("This experiment's saved code copies the full dataset (about 48 GB) "
                   "from Drive to the runtime SSD before training.", flush=True)
@@ -277,7 +277,7 @@ for family, number in (("standard", "02"), ("modified", "03")):
             def run_proxy(*, first_only=False):
                 options = ["--end", 1] if first_only else []
                 run_training("sweep", "{family}_proxy", FAMILY_RUNS / "protocol.json",
-                    *training_data(single_proxy_trial=first_only), "--output", RUNS / "proxy", *options)
+                    *training_data(proxy=True), "--output", RUNS / "proxy", *options)
         """),
             code("""
             # Smoke run · train trial 000 on 20 tokens per parameter

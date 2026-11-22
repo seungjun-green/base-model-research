@@ -369,21 +369,42 @@ def test_proxy_notebook_smoke_finishes_one_trial_and_full_skips_it(
     assert (family_runs / "best_hparams.json").is_file()
 
 
-def test_pinned_trainer_without_shard_cache_can_start_one_trial_directly(
-    tmp_path, corpus, monkeypatch, capsys
+@pytest.mark.parametrize("family", ["standard", "modified"])
+def test_both_proxy_modes_read_drive_when_pinned_trainer_lacks_shard_cache(
+    tmp_path, corpus, monkeypatch, capsys, family
 ):
     from base_model_research import data
 
-    path = Path("notebooks/02_standard_proxy_search.ipynb")
+    path = next(Path("notebooks").glob(f"*_{family}_proxy_search.ipynb"))
     cells = json.loads(path.read_text())["cells"]
     setup = next(cell["source"] for cell in cells if "def training_data(" in cell["source"])
     local = tmp_path / "ssd"
     copies = []
-    env = {"SAVED_DATA": corpus, "DATA": local, "run": lambda *args: copies.append(args)}
+    env = {
+        "RUNS": tmp_path / "runs",
+        "SAVED_DATA": corpus,
+        "DATA": local,
+        "run": lambda *args: copies.append(args),
+    }
     exec(setup[setup.index("def training_data(") :], env)  # noqa: S102 - generated notebook functions
     monkeypatch.setattr(data, "TokenCorpus", lambda root, split: None)  # Signature before --cache-dir.
 
-    assert env["training_data"](single_proxy_trial=True) == ["--data", corpus]
+    launches = []
+    env["run_training"] = lambda *args: launches.append(args)
+    proxy_cell = next(cell["source"] for cell in cells if "def run_proxy(" in cell["source"])
+    exec(proxy_cell, env)  # noqa: S102 - generated notebook function
+    env["run_proxy"](first_only=True)
+    env["run_proxy"]()
+    expected = (
+        "sweep",
+        f"{family}_proxy",
+        env["FAMILY_RUNS"] / "protocol.json",
+        "--data",
+        corpus,
+        "--output",
+        env["RUNS"] / "proxy",
+    )
+    assert launches == [(*expected, "--end", 1), expected]
     assert not copies
     assert "directly from Google Drive" in capsys.readouterr().out
     assert env["training_data"]() == ["--data", local]
