@@ -51,7 +51,11 @@ To prepare the data on your Mac, open [local notebook 01](notebooks/local/01_pre
 and select **Run All**. Drag the completed `~/Downloads/fineweb_edu_tinyllama` folder into
 **My Drive → bmr → data** and continue with notebook 02 once the upload finishes.
 
-All seven notebooks use the selected Colab runtime's Python and PyTorch. Setup
+To time one standard 158M run after preparing the data, open the
+[optional timing notebook in Colab](https://colab.research.google.com/github/seungjun-green/base-model-research/blob/main/notebooks/time_standard_main.ipynb).
+It trains with one randomly selected hyperparameter set and shows a live ETA for its full token budget.
+
+All Colab notebooks use the selected runtime's Python and PyTorch. Setup
 installs the project and its dependencies into that runtime. Notebook 06 also
 installs the evaluation harness. The Git commit is saved once per experiment.
 
@@ -172,7 +176,7 @@ shifted causal indexing and supports rolling likelihood and basic greedy generat
 - `data.py`: token preparation, manifests, shards, and exact data cursors.
 - `training.py`, `storage.py`: training, validation, checkpointing, and Drive synchronization.
 - `search.py`, `evaluation.py`, `diagnostics.py`: sweeps, harness adapter, and runtime checks.
-- `notebooks/` contains the seven Colab launchers and the local data preparation notebook in `local/`.
+- `notebooks/` contains the seven experiment launchers, the optional timing notebook, and local data preparation in `local/`.
   Regenerate them with `python scripts/build_notebooks.py`.
 - `tests/`: parameter counts, equations, causality, gradients, μP, token accounting,
   resumability, likelihood indexing, and trial reproducibility.

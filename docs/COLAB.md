@@ -3,7 +3,7 @@
 ## Runtime
 
 In hosted Colab, select **CPU** for notebook 01 and **RTX PRO 6000** for the
-other six notebooks. Run **Experiment storage** in each notebook and approve the Google Drive mount.
+training, profiling, and benchmark notebooks. Run **Experiment storage** in each notebook and approve the Google Drive mount.
 The cell prints the experiment folder shared by all notebooks.
 
 Allow about 12.7 GB of runtime disk for corpus preparation or full main training,
@@ -20,7 +20,7 @@ microbatch size. Each proxy notebook has its own microbatch control. The global 
 
 ## GitHub and environment
 
-Open notebook 00 in Colab, mount Drive, and run the setup cell. All seven notebooks
+Open notebook 00 in Colab, mount Drive, and run the setup cell. All hosted notebooks
 use [seungjun-green/base-model-research](https://github.com/seungjun-green/base-model-research).
 The first setup in a new experiment saves the current commit of the repository's
 default branch in `source.json` on Drive. Later notebooks and fresh runtimes reuse
@@ -48,6 +48,10 @@ reopens the saved experiment. All notebooks launch the same Python package.
 5. `04_train_standard_main.ipynb`: transfer the standard winning settings.
 6. `05_train_modified_main.ipynb`: transfer the modified winning settings.
 7. `06_benchmarks.ipynb`: run the five-model comparison.
+
+After preparing the data, you can open the [optional 158M timing notebook](https://colab.research.google.com/github/seungjun-green/base-model-research/blob/main/notebooks/time_standard_main.ipynb)
+on the RTX PRO 6000. It trains one standard main model with a seeded random draw from the shared trials.
+The progress bar shows time remaining for the full run. Its checkpoints and metrics go under `timing/standard/` in the experiment folder.
 
 In notebooks 02 and 03, the first code cell mounts Google Drive. In the next cell,
 set `MICROBATCH_SIZE`, `RUN_SMOKE`, and `RUN_FULL`. The microbatch defaults to 4 sequences

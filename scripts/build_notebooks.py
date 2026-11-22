@@ -356,6 +356,81 @@ for family, number, proxy_number in (("standard", "04", "02"), ("modified", "05"
     )
 
 notebook(
+    "time_standard_main.ipynb",
+    "Time one standard 158M training run",
+    [
+        markdown(
+            "Run this once the TinyLlama-tokenized FineWeb-Edu corpus from notebook 01 is ready. "
+            "It draws one of the 32 hyperparameter combinations and trains on 3,156,295,680 targets "
+            "(20 per parameter). You can run it before the proxy searches. The tqdm bar estimates "
+            "the remaining time from completed optimizer updates. Give it several updates to settle. "
+            "Validation and Drive writes can add time beyond the early estimate."
+        ),
+        code("""
+            import random
+            import sys
+
+            sys.path.insert(0, str(REPO / "src"))
+            from base_model_research.config import Hyperparameters, ModelConfig, TrainConfig
+            from base_model_research.search import load_trials
+
+            DRAW_SEED = 42  # The same seed selects the same hyperparameters when you reopen Colab.
+            trials = load_trials(REPO / "experiments/trials_seed42.json")["trials"]
+            trial = random.Random(DRAW_SEED).choice(trials)
+            model = ModelConfig.load(REPO / "configs/models/standard_main.yaml")
+            hp = Hyperparameters(**trial["hyperparameters"])
+            output = RUNS / "timing" / "standard" / trial["id"]
+            record = output / "run.json"
+            profile = RUNS / "standard_main_profile.json"
+            if record.is_file():
+                settings = TrainConfig.from_record(json.loads(record.read_text())["training"])
+            else:
+                memory = json.loads(profile.read_text())["training"] if profile.is_file() else {}
+                settings = TrainConfig.load(REPO / "configs/training.yaml",
+                                            microbatch_size=memory.get("microbatch_size"),
+                                            activation_checkpointing=memory.get("activation_checkpointing"))
+
+            print(f"Selected {trial['id']} with a microbatch of {settings.microbatch_size} sequences.")
+            print(json.dumps(trial["hyperparameters"], indent=2))
+            print(f"Timing run folder: {output}")
+        """),
+        markdown(
+            "You can stop the next cell once you have a time estimate, or leave it running to finish. "
+            "Each of the 20 validations saves weights and optimizer state to the timing run folder "
+            "(about 38 GB total for a full run). Rerunning resumes from the latest completed save. "
+            "Before the first save, it restarts from the original seed."
+        ),
+        code("""
+            from contextlib import chdir, ExitStack
+            from base_model_research.training import train
+            from tqdm.auto import tqdm
+
+            def train_one_model():
+                if not (SAVED_DATA / "manifest.json").is_file():
+                    raise FileNotFoundError(f"Prepare and upload the notebook 01 corpus to {SAVED_DATA}.")
+                cache = DATA.parent / "cached_shards" if DATA != SAVED_DATA else None
+                with chdir(REPO), ExitStack() as display:
+                    bar = None
+
+                    def show_update(label, unit, completed, total, detail=""):
+                        nonlocal bar
+                        if bar is None:
+                            bar = display.enter_context(tqdm(desc=label, unit=unit, initial=completed, total=total))
+                        bar.set_postfix_str(detail, refresh=False)
+                        bar.update(completed - bar.n)
+
+                    return train(model, hp, settings, SAVED_DATA, output, resume=record.is_file(),
+                                 selection={"method": "random", "trial_id": trial["id"]},
+                                 progress=show_update, cache_dir=cache)
+
+            print("Initializing the standard model. The ETA appears after the first optimizer update.", flush=True)
+            result = train_one_model()
+            print(f"Run {result['status']} at update {result['step']:,}.")
+        """),
+    ],
+)
+
+notebook(
     "06_benchmarks.ipynb",
     "Compare our two main models and three pretrained references",
     [

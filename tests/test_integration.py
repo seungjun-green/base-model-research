@@ -252,7 +252,7 @@ def test_actual_harness_evaluates_offline_task(monkeypatch, tiny_config, hp):
 
 def test_notebook_cells_are_valid_python_and_have_no_saved_outputs():
     notebooks = list(Path("notebooks").glob("*.ipynb"))
-    assert len(notebooks) == 7
+    assert len(notebooks) == 8
     for path in [*notebooks, Path("notebooks/local/01_prepare_data.ipynb")]:
         notebook = json.loads(path.read_text())
         if path.parent.name == "local":
@@ -266,6 +266,39 @@ def test_notebook_cells_are_valid_python_and_have_no_saved_outputs():
             if cell["cell_type"] == "code":
                 assert cell["execution_count"] is None and not cell["outputs"]
                 compile(cell["source"], str(path), "exec")
+
+
+def test_timing_notebook_trains_one_random_main_without_a_sweep(
+    tmp_path, corpus, tiny_config, training_config, monkeypatch, capsys
+):
+    from base_model_research import training
+    from base_model_research.config import ModelConfig
+
+    path = Path("notebooks/time_standard_main.ipynb")
+    cells = [cell["source"] for cell in json.loads(path.read_text())["cells"] if cell["cell_type"] == "code"]
+    env = {"REPO": Path.cwd(), "RUNS": tmp_path / "runs", "SAVED_DATA": corpus, "DATA": corpus, "json": json}
+
+    def run_cell(source):
+        exec(compile(source, str(path), "exec"), env)  # noqa: S102 - execute the generated notebook cell
+
+    run_cell(cells[-2])
+    assert env["model"] == ModelConfig.load("configs/models/standard_main.yaml")
+    assert env["settings"].tokens_per_parameter == 20
+    assert env["output"] == env["RUNS"] / "timing" / "standard" / env["trial"]["id"]
+
+    # Exercise the notebook's full training cell on the small CPU fixtures.
+    env.update(model=tiny_config.at_width(2), settings=training_config)
+    real_train = training.train
+    monkeypatch.setattr(training, "train", lambda *a, **kw: real_train(*a, device="cpu", **kw))
+    run_cell(cells[-1])
+    result = env["result"]
+    run = json.loads(env["record"].read_text())
+    assert result["status"] == "complete" and result["consumed_tokens"] == run["token_budget"]
+    assert run["hyperparameters"] == env["trial"]["hyperparameters"]
+    assert run["selection"]["trial_id"] == env["trial"]["id"]
+    assert f"{run['total_steps']}/{run['total_steps']}" in capsys.readouterr().err
+    run_cell(cells[-1])
+    assert env["result"]["step"] == run["total_steps"]
 
 
 @pytest.mark.parametrize(("benchmark", "extras"), [(False, "data"), (True, "data,eval")])
