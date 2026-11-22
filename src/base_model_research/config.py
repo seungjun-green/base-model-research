@@ -6,6 +6,8 @@ from pathlib import Path
 
 import yaml
 
+DEFAULT_TRAINING_TARGETS = 11_957_698_560
+
 SHARED_TRAINING_FIELDS = (
     "context_length",
     "global_batch_size",

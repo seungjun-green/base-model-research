@@ -185,7 +185,11 @@ def test_preparation_pins_revisions_and_splits_whole_documents(tmp_path, monkeyp
         with pytest.raises(KeyboardInterrupt):
             prepare_data(output, max_training_tokens=25, validation_documents=2, shard_tokens=7)
     assert not output.exists() and not list(tmp_path.glob("prepared.preparing*"))
-    manifest = prepare_data(output, max_training_tokens=25, validation_documents=2, shard_tokens=7)
+    increments = []
+    manifest = prepare_data(
+        output, max_training_tokens=25, validation_documents=2, shard_tokens=7, on_progress=increments.append
+    )
+    assert sum(increments) == 26
     assert manifest["dataset_revision"] == received["revision"] == "data-sha"
     assert manifest["tokenizer_revision"] == "tokenizer-sha"
     assert manifest["splits"]["train"]["tokens"] == 26
@@ -247,8 +251,10 @@ def test_actual_harness_evaluates_offline_task(monkeypatch, tiny_config, hp):
 def test_notebook_cells_are_valid_python_and_have_no_saved_outputs():
     notebooks = list(Path("notebooks").glob("*.ipynb"))
     assert len(notebooks) == 7
-    for path in notebooks:
+    for path in [*notebooks, Path("notebooks/local/01_prepare_data.ipynb")]:
         notebook = json.loads(path.read_text())
+        if path.parent.name == "local":
+            assert "colab" not in notebook["metadata"]
         if path.name.startswith("01_"):
             assert "accelerator" not in notebook["metadata"]
             assert "CPU" in notebook["cells"][0]["source"]

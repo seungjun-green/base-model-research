@@ -1,4 +1,4 @@
-"""Generate small, reviewable Colab launchers; training lives in the package."""
+"""Generate the experiment notebooks from the shared Python implementation."""
 
 import json
 import textwrap
@@ -88,6 +88,24 @@ TRAINING_LAUNCHER = """
 """
 
 
+def write_notebook(name, cells, metadata):
+    content = {
+        "nbformat": 4,
+        "nbformat_minor": 5,
+        "metadata": {
+            "kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"},
+            "language_info": {"name": "python"},
+            **metadata,
+        },
+        "cells": cells,
+    }
+    for index, cell in enumerate(content["cells"]):
+        cell["id"] = f"cell-{index:03d}"
+    path = ROOT / "notebooks" / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(content, indent=2) + "\n")
+
+
 def notebook(name, title, cells, *, controls=None, training=False, benchmark=False, gpu=True):
     setup = (ROOT / "scripts" / "colab_setup.py").read_text()
     bootstrap = (
@@ -99,16 +117,9 @@ def notebook(name, title, cells, *, controls=None, training=False, benchmark=Fal
     if training:
         bootstrap += textwrap.dedent(TRAINING_LAUNCHER)
     runtime = "Select the RTX PRO 6000 GPU" if gpu else "Select a CPU runtime"
-    content = {
-        "nbformat": 4,
-        "nbformat_minor": 5,
-        "metadata": {
-            "kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"},
-            "language_info": {"name": "python"},
-            **({"accelerator": "GPU"} if gpu else {}),
-            "colab": {"name": name},
-        },
-        "cells": [
+    write_notebook(
+        name,
+        [
             markdown(
                 f"# {title}\n\n{runtime} in Colab, run the cells in order, "
                 "and approve the Google Drive mount when prompted."
@@ -118,12 +129,8 @@ def notebook(name, title, cells, *, controls=None, training=False, benchmark=Fal
             code(bootstrap),
             *cells,
         ],
-    }
-    for index, cell in enumerate(content["cells"]):
-        cell["id"] = f"cell-{index:03d}"
-    path = ROOT / "notebooks" / name
-    path.parent.mkdir(exist_ok=True)
-    path.write_text(json.dumps(content, indent=2) + "\n")
+        {**({"accelerator": "GPU"} if gpu else {}), "colab": {"name": name}},
+    )
 
 
 notebook(
@@ -180,6 +187,71 @@ notebook(
     """),
     ],
     gpu=False,
+)
+
+write_notebook(
+    "local/01_prepare_data.ipynb",
+    [
+        markdown("""
+            # Prepare FineWeb-Edu on your Mac
+
+            Open this notebook in the project with your local Python 3 kernel and choose **Run All**.
+            Your CPU streams FineWeb-Edu, tokenizes with Qwen3-0.6B-Base, and saves the corpus in
+            **Downloads → fineweb_edu**. Allow about 48 GB for tokens plus room for caches.
+            After the validation documents, the progress bar shows training tokens per second and time remaining.
+            Keep the Mac awake while this runs. Interrupting tokenization discards the partial run.
+        """),
+        code("""
+            from pathlib import Path
+            import shutil
+            import sys
+
+            # Change this path if you want to use an external disk.
+            OUTPUT = Path.home() / "Downloads" / "fineweb_edu"
+            OUTPUT.parent.mkdir(parents=True, exist_ok=True)
+            print(f"Output folder: {OUTPUT}")
+            print(f"Free disk space: {shutil.disk_usage(OUTPUT.parent).free / 1e9:.1f} GB")
+
+            cwd = Path.cwd()
+            repo = next((p for p in (cwd, *cwd.parents) if (p / "src/base_model_research/data.py").is_file()), None)
+            if repo is None:
+                raise RuntimeError("Open this notebook inside the base-model-research project folder.")
+            sys.path.insert(0, str(repo / "src"))
+            from base_model_research.config import DEFAULT_TRAINING_TARGETS
+            from base_model_research.data import TokenCorpus, prepare_data
+            from tqdm.auto import tqdm
+        """),
+        code("""
+            if not (OUTPUT / "manifest.json").is_file():
+                print("Opening FineWeb-Edu. The first 2,048 documents go to validation.", flush=True)
+                with tqdm(
+                    total=DEFAULT_TRAINING_TARGETS + 1, desc="Training tokens", unit="tok", unit_scale=True, mininterval=1
+                ) as progress:
+                    prepare_data(OUTPUT, on_progress=progress.update)
+
+            train = TokenCorpus(OUTPUT, "train")
+            validation = TokenCorpus(OUTPUT, "validation")
+            manifest = train.manifest
+            if (
+                train.total_tokens != DEFAULT_TRAINING_TARGETS + 1
+                or manifest.get("dataset") != "HuggingFaceFW/fineweb-edu"
+                or manifest.get("dataset_config") != "sample-100BT"
+                or manifest.get("tokenizer") != "Qwen/Qwen3-0.6B-Base"
+                or manifest.get("validation_documents") != 2048
+                or not (OUTPUT / "tokenizer" / "tokenizer_config.json").is_file()
+            ):
+                raise ValueError(f"The folder at {OUTPUT} does not contain the full experiment corpus.")
+            print(f"Training targets: {train.total_tokens - 1:,}   Validation tokens: {validation.total_tokens:,}")
+            print(f"Ready to upload: {OUTPUT}")
+        """),
+        markdown("""
+            When the cell prints **Ready to upload**, drag the entire **fineweb_edu** folder from Finder
+            into **My Drive → bmr → data** in your browser. After the upload finishes, the manifest should
+            be at `My Drive/bmr/data/fineweb_edu/manifest.json`. Continue with **02_standard_proxy_search**
+            in Colab.
+        """),
+    ],
+    {},
 )
 
 for family, number in (("standard", "02"), ("modified", "03")):

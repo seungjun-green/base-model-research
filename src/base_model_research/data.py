@@ -12,7 +12,7 @@ from tempfile import NamedTemporaryFile, TemporaryDirectory
 import numpy as np
 import torch
 
-from .config import dump_json, json_fingerprint
+from .config import DEFAULT_TRAINING_TARGETS, dump_json, json_fingerprint
 
 
 def file_sha256(path):
@@ -163,7 +163,7 @@ class TokenCorpus:
 
 def prepare_data(
     output,
-    max_training_tokens=11_957_698_560,
+    max_training_tokens=DEFAULT_TRAINING_TARGETS,
     validation_documents=2048,
     dataset="HuggingFaceFW/fineweb-edu",
     dataset_config="sample-100BT",
@@ -171,10 +171,13 @@ def prepare_data(
     dataset_revision=None,
     tokenizer_revision=None,
     shard_tokens=64_000_000,
+    *,
+    on_progress=None,
 ):
     """Download/tokenize once. Validation uses the first N complete documents.
 
     Build in a private temporary directory and publish only the complete corpus.
+    on_progress receives the number of new training tokens written in each batch.
     """
     from datasets import load_dataset
     from huggingface_hub import HfApi
@@ -206,6 +209,7 @@ def prepare_data(
         last_percent = -1
         try:
             while train.total < required:
+                previous_tokens = train.total
                 batch = list(islice(documents, 128))
                 if not batch:
                     raise ValueError(
@@ -224,7 +228,9 @@ def prepare_data(
                     if train.total == required:
                         break
                 percent = 100 * train.total // required
-                if percent > last_percent:
+                if on_progress is not None:
+                    on_progress(train.total - previous_tokens)
+                elif percent > last_percent:
                     print(
                         f"Prepared {percent}% ({train.total:,}/{required:,} tokens, {seen:,} documents)",
                         flush=True,

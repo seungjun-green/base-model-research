@@ -2,7 +2,14 @@ import argparse
 import json
 from pathlib import Path
 
-from .config import SHARED_TRAINING_FIELDS, Hyperparameters, ModelConfig, TrainConfig, dump_json
+from .config import (
+    DEFAULT_TRAINING_TARGETS,
+    SHARED_TRAINING_FIELDS,
+    Hyperparameters,
+    ModelConfig,
+    TrainConfig,
+    dump_json,
+)
 
 
 def main():
@@ -13,7 +20,7 @@ def main():
     p.add_argument("--output", default="experiments/trials_seed42.json")
     p = commands.add_parser("prepare-data")
     p.add_argument("--output", required=True)
-    p.add_argument("--training-tokens", type=int, default=11_957_698_560)
+    p.add_argument("--training-tokens", type=int, default=DEFAULT_TRAINING_TARGETS)
     p.add_argument("--validation-documents", type=int, default=2048)
     p.add_argument("--dataset", default="HuggingFaceFW/fineweb-edu")
     p.add_argument("--dataset-config", default="sample-100BT")

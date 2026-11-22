@@ -44,6 +44,10 @@ Open notebook 00, select the RTX PRO 6000 runtime, and run all cells. Approve th
 Google Drive mount. Notebook 01 prepares the data on CPU. Use the GPU for notebooks
 02–06. [Open notebook 00 in Colab](https://colab.research.google.com/github/seungjun-green/base-model-research/blob/main/notebooks/00_setup_and_checks.ipynb) · [Notebook order and run controls](docs/COLAB.md)
 
+To prepare the data on your Mac, open [local notebook 01](notebooks/local/01_prepare_data.ipynb)
+and select **Run All**. Drag the completed `~/Downloads/fineweb_edu` folder into
+**My Drive → bmr → data** and continue with notebook 02 once the upload finishes.
+
 All seven notebooks use the selected Colab runtime's Python and PyTorch. Setup
 installs the project and its dependencies into that runtime. Notebook 06 also
 installs the evaluation harness. The Git commit is saved once per experiment.
@@ -164,7 +168,8 @@ shifted causal indexing and supports rolling likelihood and basic greedy generat
 - `data.py`: token preparation, manifests, shards, and exact data cursors.
 - `training.py`, `storage.py`: training, validation, checkpointing, and Drive synchronization.
 - `search.py`, `evaluation.py`, `diagnostics.py`: sweeps, harness adapter, and runtime checks.
-- `notebooks/`: seven Colab launchers; regenerate with `python scripts/build_notebooks.py`.
+- `notebooks/` contains the seven Colab launchers and the local data preparation notebook in `local/`.
+  Regenerate them with `python scripts/build_notebooks.py`.
 - `tests/`: parameter counts, equations, causality, gradients, μP, token accounting,
   resumability, likelihood indexing, and trial reproducibility.
 
