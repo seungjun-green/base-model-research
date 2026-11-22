@@ -4,6 +4,7 @@ import pytest
 import torch
 from torch.nn import functional as F
 
+from base_model_research.config import DEFAULT_TRAINING_TARGETS, ModelConfig
 from base_model_research.diagnostics import check_parameter_counts
 from base_model_research.models import parameter_count
 from base_model_research.parameterization import build_model, make_optimizer
@@ -11,8 +12,14 @@ from base_model_research.parameterization import build_model, make_optimizer
 
 def test_all_four_exact_parameter_counts():
     counts = check_parameter_counts()
-    assert counts["standard_main"]["parameters"] == 596_049_920
-    assert counts["modified_main"]["parameters"] == 597_884_928
+    for family in ("standard", "modified"):
+        proxy = ModelConfig.load(f"configs/models/{family}_proxy.yaml")
+        main = ModelConfig.load(f"configs/models/{family}_main.yaml")
+        assert proxy.width_mult == 1 and proxy.d_model == 144 and proxy.vocab_size == 32_000
+        assert proxy.at_width(4) == main
+    assert counts["standard_main"]["parameters"] == 157_814_784
+    assert counts["modified_main"]["parameters"] == 158_395_392
+    assert max(row["training_tokens"] for row in counts.values()) == DEFAULT_TRAINING_TARGETS
 
 
 @pytest.mark.parametrize("family", ["standard", "modified"])

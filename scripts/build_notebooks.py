@@ -30,8 +30,8 @@ STORAGE = code("""
 
     default_workspace = "/content/bmr" if Path("/content").is_dir() else "~/bmr-workspace"
     WORKSPACE = Path(os.environ.get("BMR_WORKSPACE", default_workspace)).expanduser().resolve()
-    EXPERIMENT = "standard_vs_gated"
-    DATA = WORKSPACE / "data" / "fineweb_edu"
+    EXPERIMENT = "standard_vs_gated_160m_tinyllama"
+    DATA = WORKSPACE / "data" / "fineweb_edu_tinyllama"
     if USE_GOOGLE_DRIVE:
         from google.colab import drive
         drive.mount("/content/drive")
@@ -42,7 +42,7 @@ STORAGE = code("""
     else:
         storage = WORKSPACE
     RUNS = storage / "runs" / EXPERIMENT
-    SAVED_DATA = storage / "data" / "fineweb_edu"
+    SAVED_DATA = storage / "data" / "fineweb_edu_tinyllama"
     print("Experiment outputs:", RUNS)
 """)
 
@@ -58,26 +58,22 @@ TRAINING_LAUNCHER = """
     sys.path.insert(0, str(REPO / "src"))
     from base_model_research.progress import run_with_progress
 
-    def training_data(*, proxy=False):
+    def training_data():
         print(f"Checking the prepared dataset at {SAVED_DATA}…", flush=True)
         if not (SAVED_DATA / "manifest.json").is_file():
             raise FileNotFoundError(f"Run notebook 01 to prepare the shared dataset at {SAVED_DATA}.")
         if SAVED_DATA == DATA:
             return ["--data", SAVED_DATA]
-        if not (DATA / "manifest.json").is_file():
-            from inspect import signature
-            from base_model_research.data import TokenCorpus
-            if "cache_dir" in signature(TokenCorpus).parameters:
-                print("Training will cache each shard on the runtime SSD when it is first read.", flush=True)
-                return ["--data", SAVED_DATA, "--cache-dir", DATA.parent / "cached_shards"]
-            if proxy:
-                print("Reading proxy training and validation shards directly from Google Drive.", flush=True)
-                return ["--data", SAVED_DATA]
-            print("This experiment's saved code copies the full dataset (about 48 GB) "
-                  "from Drive to the runtime SSD before training.", flush=True)
-            print(f"To check the copy in the Colab Terminal: du -sh '{DATA}.copying'", flush=True)
-        else:
-            print("Checking the prepared copy on the runtime SSD…", flush=True)
+        local_manifest = DATA / "manifest.json"
+        if local_manifest.is_file() and local_manifest.read_bytes() == (SAVED_DATA / "manifest.json").read_bytes():
+            print("Using the prepared copy on the runtime SSD.", flush=True)
+            return ["--data", DATA]
+        from inspect import signature
+        from base_model_research.data import TokenCorpus
+        if "cache_dir" in signature(TokenCorpus).parameters:
+            print("Training will cache each shard on the runtime SSD when it is first read.", flush=True)
+            return ["--data", SAVED_DATA, "--cache-dir", DATA.parent / "cached_shards"]
+        print("The pinned trainer requires a full local copy. Copying the prepared corpus…", flush=True)
         run("copy-data", "--source", SAVED_DATA, "--destination", DATA)
         return ["--data", DATA]
 
@@ -191,18 +187,24 @@ notebook(
     [
         markdown(
             "Prepare once and reuse for every run. Default: 2,048 held-out whole documents, followed by "
-            "11,957,698,560 training targets plus one lookahead token. uint32 tokens occupy about 48 GB "
+            "3,167,907,840 training targets plus one lookahead token. uint32 tokens occupy about 12.7 GB "
             "in decimal units, plus validation, tokenizer and caches. If preparation stops, rerun this cell. "
             "Tokenization starts over if needed. A partial Drive copy resumes from verified shards."
         ),
         code("""
         import shutil
+        from base_model_research.config import DEFAULT_TOKENIZER, DEFAULT_TRAINING_TARGETS
+
         print("Free disk GB:", shutil.disk_usage(WORKSPACE).free / 1e9)
-        if not (SAVED_DATA / "manifest.json").is_file():
-            if not (DATA / "manifest.json").is_file():
-                run("prepare-data", "--output", DATA)
-            if SAVED_DATA != DATA:
-                run("copy-data", "--source", DATA, "--destination", SAVED_DATA)
+        prepared = SAVED_DATA if (SAVED_DATA / "manifest.json").is_file() else DATA
+        if not (prepared / "manifest.json").is_file():
+            run("prepare-data", "--output", prepared)
+        manifest = json.loads((prepared / "manifest.json").read_text())
+        if (manifest["tokenizer"] != DEFAULT_TOKENIZER
+                or manifest["splits"]["train"]["tokens"] < DEFAULT_TRAINING_TARGETS + 1):
+            raise ValueError(f"Expected the full TinyLlama-tokenized experiment corpus at {prepared}.")
+        if prepared != SAVED_DATA:
+            run("copy-data", "--source", prepared, "--destination", SAVED_DATA)
         print("Prepared corpus:", SAVED_DATA)
     """),
     ],
@@ -216,8 +218,8 @@ write_notebook(
             # Prepare FineWeb-Edu on your Mac
 
             Open this notebook in the project with your local Python 3 kernel and choose **Run All**.
-            Your CPU streams FineWeb-Edu, tokenizes with Qwen3-0.6B-Base, and saves the corpus in
-            **Downloads → fineweb_edu**. Allow about 48 GB for tokens plus room for caches.
+            Your CPU streams FineWeb-Edu, tokenizes with the TinyLlama 32k tokenizer, and saves the corpus in
+            **Downloads → fineweb_edu_tinyllama**. Allow about 12.7 GB for tokens plus room for caches.
             After the validation documents, the progress bar shows training tokens per second and time remaining.
             Keep the Mac awake while this runs. Interrupting tokenization discards the partial run.
         """),
@@ -227,7 +229,7 @@ write_notebook(
             import sys
 
             # Change this path if you want to use an external disk.
-            OUTPUT = Path.home() / "Downloads" / "fineweb_edu"
+            OUTPUT = Path.home() / "Downloads" / "fineweb_edu_tinyllama"
             OUTPUT.parent.mkdir(parents=True, exist_ok=True)
             print(f"Output folder: {OUTPUT}")
             print(f"Free disk space: {shutil.disk_usage(OUTPUT.parent).free / 1e9:.1f} GB")
@@ -237,7 +239,7 @@ write_notebook(
             if repo is None:
                 raise RuntimeError("Open this notebook inside the base-model-research project folder.")
             sys.path.insert(0, str(repo / "src"))
-            from base_model_research.config import DEFAULT_TRAINING_TARGETS
+            from base_model_research.config import DEFAULT_TOKENIZER, DEFAULT_TRAINING_TARGETS
             from base_model_research.data import TokenCorpus, prepare_data
             from tqdm.auto import tqdm
         """),
@@ -253,10 +255,10 @@ write_notebook(
             validation = TokenCorpus(OUTPUT, "validation")
             manifest = train.manifest
             if (
-                train.total_tokens != DEFAULT_TRAINING_TARGETS + 1
+                train.total_tokens < DEFAULT_TRAINING_TARGETS + 1
                 or manifest.get("dataset") != "HuggingFaceFW/fineweb-edu"
                 or manifest.get("dataset_config") != "sample-100BT"
-                or manifest.get("tokenizer") != "Qwen/Qwen3-0.6B-Base"
+                or manifest.get("tokenizer") != DEFAULT_TOKENIZER
                 or manifest.get("validation_documents") != 2048
                 or not (OUTPUT / "tokenizer" / "tokenizer_config.json").is_file()
             ):
@@ -265,9 +267,9 @@ write_notebook(
             print(f"Ready to upload: {OUTPUT}")
         """),
         markdown("""
-            When the cell prints **Ready to upload**, drag the entire **fineweb_edu** folder from Finder
+            When the cell prints **Ready to upload**, drag the entire **fineweb_edu_tinyllama** folder from Finder
             into **My Drive → bmr → data** in your browser. After the upload finishes, the manifest should
-            be at `My Drive/bmr/data/fineweb_edu/manifest.json`. Continue with **02_standard_proxy_search**
+            be at `My Drive/bmr/data/fineweb_edu_tinyllama/manifest.json`. Continue with **02_standard_proxy_search**
             in Colab.
         """),
     ],
@@ -277,7 +279,7 @@ write_notebook(
 for family, number in (("standard", "02"), ("modified", "03")):
     notebook(
         f"{number}_{family}_proxy_search.ipynb",
-        f"{family.title()} proxy: 32 shared trials",
+        f"{family.title()} 13.3M proxy: 32 shared trials",
         [
             code(f"""
             # Copy proxy data from Google Drive to /content
@@ -323,7 +325,7 @@ for family, number in (("standard", "02"), ("modified", "03")):
             MICROBATCH_SIZE = 4  # Sequences per GPU microbatch. Choose a divisor of 128.
             RUN_SMOKE = True
             RUN_FULL = False
-            # RUN_SMOKE trains one full trial (~1.33B tokens, 20 validations).
+            # RUN_SMOKE trains one full trial (~267M tokens, 20 validations).
             # RUN_FULL runs the 32-trial search and skips completed trials, including trial 000.
         """),
     )
@@ -331,13 +333,13 @@ for family, number in (("standard", "02"), ("modified", "03")):
 for family, number, proxy_number in (("standard", "04", "02"), ("modified", "05", "03")):
     notebook(
         f"{number}_train_{family}_main.ipynb",
-        f"Train the {family} main model from scratch",
+        f"Train the {family} ~160M main model from scratch",
         [
             markdown(
                 "Trains once through this family's token budget and validates at 5% intervals. "
                 "Each of the 20 validations saves the model weights and optimizer state to Drive. "
                 "The 20th save includes the final optimizer update. Rerun this notebook to continue "
-                "from the latest completed save. Allow about 144 GB on Drive per main model."
+                "from the latest completed save. Allow about 38 GB on Drive per main model."
             ),
             code(f'''
             OUTPUT = RUNS / "main" / "{family}"

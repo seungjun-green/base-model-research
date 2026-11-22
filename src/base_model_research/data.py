@@ -12,7 +12,13 @@ from tempfile import NamedTemporaryFile, TemporaryDirectory
 import numpy as np
 import torch
 
-from .config import DEFAULT_TRAINING_TARGETS, dump_json, json_fingerprint
+from .config import (
+    DEFAULT_TOKENIZER,
+    DEFAULT_TRAINING_TARGETS,
+    TINYLLAMA_VOCAB_SIZE,
+    dump_json,
+    json_fingerprint,
+)
 
 
 def file_sha256(path):
@@ -161,13 +167,22 @@ class TokenCorpus:
         return x, torch.from_numpy(y.reshape(-1, context_length))
 
 
+def load_corpus_tokenizer(path, *, tokenizer_name=None, **kwargs):
+    from transformers import AutoTokenizer, PreTrainedTokenizerFast
+
+    if (tokenizer_name or path) == DEFAULT_TOKENIZER:
+        # TinyLlama ships a complete tokenizer.json, including its SentencePiece rules.
+        return PreTrainedTokenizerFast.from_pretrained(path, **kwargs)
+    return AutoTokenizer.from_pretrained(path, **kwargs)
+
+
 def prepare_data(
     output,
     max_training_tokens=DEFAULT_TRAINING_TARGETS,
     validation_documents=2048,
     dataset="HuggingFaceFW/fineweb-edu",
     dataset_config="sample-100BT",
-    tokenizer_name="Qwen/Qwen3-0.6B-Base",
+    tokenizer_name=DEFAULT_TOKENIZER,
     dataset_revision=None,
     tokenizer_revision=None,
     shard_tokens=64_000_000,
@@ -181,7 +196,6 @@ def prepare_data(
     """
     from datasets import load_dataset
     from huggingface_hub import HfApi
-    from transformers import AutoTokenizer
 
     output = Path(output)
     if output.exists():
@@ -191,9 +205,15 @@ def prepare_data(
     api = HfApi()
     dataset_revision = api.dataset_info(dataset, revision=dataset_revision or "main").sha
     tokenizer_revision = api.model_info(tokenizer_name, revision=tokenizer_revision or "main").sha
-    tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, revision=tokenizer_revision)
+    tokenizer = load_corpus_tokenizer(tokenizer_name, revision=tokenizer_revision)
     if tokenizer.eos_token_id is None:
         raise ValueError("Tokenizer needs an EOS token for document boundaries")
+    vocab = tokenizer.get_vocab()
+    max_id = max(vocab.values())
+    if tokenizer_name == DEFAULT_TOKENIZER and (
+        len(vocab) != TINYLLAMA_VOCAB_SIZE or max_id != TINYLLAMA_VOCAB_SIZE - 1
+    ):
+        raise ValueError("Expected the TinyLlama tokenizer with 32,000 entries and maximum ID 31,999")
     documents = iter(
         load_dataset(dataset, name=dataset_config, split="train", streaming=True, revision=dataset_revision)
     )
@@ -246,7 +266,7 @@ def prepare_data(
             dataset_revision=dataset_revision,
             tokenizer=tokenizer_name,
             tokenizer_revision=tokenizer_revision,
-            tokenizer_max_id=max(tokenizer.get_vocab().values()),
+            tokenizer_max_id=max_id,
             validation_documents=validation_documents,
             documents_seen=seen,
             document_order_sha256=identities.hexdigest(),

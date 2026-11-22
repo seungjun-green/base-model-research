@@ -1,6 +1,6 @@
 # Base Model Architecture Research Project
 
-Updated: 2026-11-12 (Asia/Seoul)
+Updated: 2026-11-22 (Asia/Seoul)
 
 This document captures the agreed experiment design. Codebase implementation began on 2026-11-12; full experiment training has not begun.
 
@@ -11,33 +11,33 @@ Compare two model families trained from scratch:
 1. **Standard:** a Qwen3-style decoder with its ordinary residual connections, trained using μP.
 2. **Modified:** a Qwen3-style decoder with gated connections using the previous layer's attention and FFN outputs, also trained using μP.
 
-Tune each family independently on a small proxy, transfer its winning hyperparameters to its approximately 0.6B main model, and compare benchmark results. Include several existing pretrained base models as references.
+Tune each family independently on a small proxy, transfer its winning hyperparameters to its approximately 160M main model, and compare benchmark results. Include several existing pretrained base models as references.
 
 ## 2. Model configurations
 
 | Setting | Standard proxy | Modified proxy | Standard main | Modified main |
 |---|---:|---:|---:|---:|
 | Decoder layers | 28 | 28 | 28 | 28 |
-| Hidden width (`d_model`) | 256 | 256 | 1024 | 1024 |
+| Hidden width (`d_model`) | 144 | 144 | 576 | 576 |
 | Query heads | 16 | 12 | 16 | 12 |
 | KV heads | 8 | 6 | 8 | 6 |
-| Head dimension | 32 | 32 | 128 | 128 |
-| FFN intermediate dimension | 768 | 560 | 3072 | 2240 |
-| Vocabulary size | 151,936 | 151,936 | 151,936 | 151,936 |
-| Total unique parameters | 66,437,120 | 66,551,808 | 596,049,920 | 597,884,928 |
-| Approximate size | 66.44M | 66.55M | 596.05M | 597.88M |
+| Head dimension | 18 | 18 | 72 | 72 |
+| FFN intermediate dimension | 432 | 315 | 1728 | 1260 |
+| Vocabulary size | 32,000 | 32,000 | 32,000 | 32,000 |
+| Total unique parameters | 13,326,336 | 13,362,624 | 157,814,784 | 158,395,392 |
+| Approximate size | 13.33M | 13.36M | 157.81M | 158.40M |
 
-The standard main model follows the [Qwen3-0.6B-Base architecture configuration](https://huggingface.co/Qwen/Qwen3-0.6B-Base/blob/main/config.json), with μP applied to training and parameterization.
+The standard main model is a narrower version of the [Qwen3-0.6B-Base architecture configuration](https://huggingface.co/Qwen/Qwen3-0.6B-Base/blob/main/config.json), with a 32,000-entry TinyLlama vocabulary and μP training.
 
-The modified family shrinks **both attention and FFN** to offset the gate parameters. The two main models differ in parameter count by approximately **0.31%**. Exact equality is unnecessary.
+The modified family shrinks **both attention and FFN** to offset the gate parameters. The two main models differ in parameter count by approximately **0.37%**. Exact equality is unnecessary.
 
 Retain Qwen3's causal grouped-query attention, pre-norm RMSNorm, QK normalization, RoPE, SwiGLU FFN, and tied input/output embeddings. The new gate linear layers have no biases.
 
 Here, **width means the hidden dimension representing each token**, not total parameter count. Within each family, the proxy-to-main changes are:
 
-- Hidden width: 256 → 1024 (**4×**).
-- Head dimension: 32 → 128 (**4×**).
-- FFN dimension: 768 → 3072 for standard; 560 → 2240 for modified (**4×**).
+- Hidden width: 144 → 576 (**4×**).
+- Head dimension: 18 → 72 (**4×**).
+- FFN dimension: 432 → 1728 for standard; 315 → 1260 for modified (**4×**).
 - Layer count and head counts stay fixed within each family.
 
 ## 3. Modified architecture
@@ -108,17 +108,17 @@ There are **four independent new matrices per decoder layer**, two for attention
 
 | Model | Shape of each new matrix | Added gate parameters across 28 layers |
 |---|---|---:|
-| Modified proxy | 256 × 256 | 7,340,032 |
-| Modified main | 1024 × 1024 | 117,440,512 |
+| Modified proxy | 144 × 144 | 2,322,432 |
+| Modified main | 576 × 576 | 37,158,912 |
 
-The attention block's final output has shape `(batch, sequence_length, d_model)` after the output projection, even with the modified head counts. At the main model's training context length, that is `(batch, 2048, 1024)`. FFN outputs and gate outputs have the same shape.
+The attention block's final output has shape `(batch, sequence_length, d_model)` after the output projection, even with the modified head counts. At the main model's training context length, that is `(batch, 2048, 576)`. FFN outputs and gate outputs have the same shape.
 
 ## 4. Dataset and shared training settings
 
 | Setting | Agreed choice |
 |---|---|
 | Dataset | [FineWeb-Edu](https://huggingface.co/datasets/HuggingFaceFW/fineweb-edu) |
-| Tokenizer for all models we train | Qwen3 tokenizer |
+| Tokenizer for all models we train | TinyLlama 32k tokenizer |
 | Training objective | Next-token prediction |
 | Context length | **2048 tokens** |
 | Global batch size | **128 sequences per optimizer update** |
@@ -142,10 +142,10 @@ Use each model's actual parameter count, including the shared embedding matrix o
 
 | Model | Training tokens per run | Training runs |
 |---|---:|---:|
-| Standard proxy | 1,328,742,400 (~1.329B) | 32 |
-| Modified proxy | 1,331,036,160 (~1.331B) | 32 |
-| Standard main | 11,920,998,400 (~11.921B) | 1 |
-| Modified main | 11,957,698,560 (~11.958B) | 1 |
+| Standard proxy | 266,526,720 (~0.267B) | 32 |
+| Modified proxy | 267,252,480 (~0.267B) | 32 |
+| Standard main | 3,156,295,680 (~3.156B) | 1 |
+| Modified main | 3,167,907,840 (~3.168B) | 1 |
 
 Total planned training runs: **64 proxy trials + 2 main runs = 66 runs**. Use the single fixed seed, 42.
 
@@ -217,7 +217,7 @@ Keep these settings fixed across trials and families. The base peak learning rat
 
 Transfer each proxy family's winning hyperparameters to its corresponding main model. Initialize fresh main-model weights; the transferred objects are the selected hyperparameter settings.
 
-The width multiplier is **1024 / 256 = 4**, rather than the ratio of total parameter counts.
+The width multiplier is **576 / 144 = 4**, rather than the ratio of total parameter counts.
 
 ### 9.1 Hidden weights
 
@@ -235,7 +235,7 @@ Keep the chosen base hyperparameter constants; μP produces the corresponding pa
 
 Qwen3 uses one shared matrix for input embeddings and the output vocabulary projection. Use μP's equivalent **Table 8 formulation**, which supports this weight sharing.
 
-| Item | Proxy: width 256 | Main: width 1024 |
+| Item | Proxy: width 144 | Main: width 576 |
 |---|---|---|
 | Width multiplier | 1 | 4 |
 | Shared matrix initialization variance | Selected proxy value | Same variance |
@@ -249,7 +249,7 @@ The additional **1/4 is calculated from the width ratio; it is not a searched hy
 
 ### 9.3 Attention scaling
 
-Use μP's **1 / head_dimension** attention-score factor with the selected attention multiplier. Head dimension grows from 32 to 128, while the chosen attention multiplier stays fixed.
+Use μP's **1 / head_dimension** attention-score factor with the selected attention multiplier. Head dimension grows from 18 to 72, while the chosen attention multiplier stays fixed.
 
 ## 10. Cosine learning-rate schedule
 
@@ -257,10 +257,10 @@ Use cosine learning-rate decay. **Each run's schedule must span that run's compl
 
 | Model | Approximate optimizer updates, rounding up |
 |---|---:|
-| Standard proxy | 5,069 |
-| Modified proxy | 5,078 |
-| Standard main | 45,475 |
-| Modified main | 45,615 |
+| Standard proxy | 1,017 |
+| Modified proxy | 1,020 |
+| Standard main | 12,041 |
+| Modified main | 12,085 |
 
 Recompute schedule duration for each model size. Preserve μP's parameter-group learning-rate ratios when applying the scheduler.
 
@@ -288,8 +288,8 @@ Compare these five models:
 
 | Model | Role |
 |---|---|
-| Our standard main model (~596.05M) | Trained baseline |
-| Our modified main model (~597.88M) | Trained architecture experiment |
+| Our standard main model (~157.81M) | Trained baseline |
+| Our modified main model (~158.40M) | Trained architecture experiment |
 | [Qwen3-0.6B-Base](https://huggingface.co/Qwen/Qwen3-0.6B-Base) | Pretrained base reference |
 | [Qwen2.5-0.5B](https://huggingface.co/Qwen/Qwen2.5-0.5B) | Pretrained base reference |
 | [SmolLM2-360M](https://huggingface.co/HuggingFaceTB/SmolLM2-360M) | Pretrained base reference |
@@ -302,17 +302,15 @@ Use the rough estimate `training FLOPs ≈ 6 × parameters × training tokens`.
 
 | Group | Runs | Approximate total training FLOPs |
 |---|---:|---:|
-| Standard proxy | 32 | 16.95 EFLOPs |
-| Modified proxy | 32 | 17.01 EFLOPs |
-| Standard main | 1 | 42.63 EFLOPs |
-| Modified main | 1 | 42.90 EFLOPs |
-| **Total** | **66** | **119.49 EFLOPs** |
+| Standard proxy | 32 | 0.68 EFLOPs |
+| Modified proxy | 32 | 0.69 EFLOPs |
+| Standard main | 1 | 2.99 EFLOPs |
+| Modified main | 1 | 3.01 EFLOPs |
+| **Total** | **66** | **7.37 EFLOPs** |
 
-Total: approximately **1.195 × 10^20 FLOPs**. This is a coarse estimate and excludes validation, additional attention costs, recomputation, and other overhead.
+Total: approximately **7.367 × 10^18 FLOPs**. This is a coarse estimate and excludes validation, additional attention costs, recomputation, and other overhead.
 
-For one **NVIDIA RTX PRO 6000 Blackwell Workstation Edition, 96GB**, the earlier planning assumption was BF16 training and **100 TFLOP/s sustained training throughput**. Under that illustrative assumption, the updated compute corresponds to approximately **332 hours (~14 days)** before additional overhead. This is not a measured throughput result; actual runtime must be estimated from measured training throughput.
-
-These counts use the latest modified configuration with **12 query heads, 6 KV heads, and FFN dimension 2240**. They supersede earlier calculations for the larger ~713.49M modified model.
+Use notebook 00 to measure training throughput for each configuration on the RTX PRO 6000 and estimate runtime from its token budget.
 
 ## 13. Source material and references
 

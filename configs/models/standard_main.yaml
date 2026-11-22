@@ -1,8 +1,10 @@
 family: standard
-d_model: 1024
+d_model: 576
 n_layers: 28
 n_heads: 16
 n_kv_heads: 8
-head_dim: 128
-d_ff: 3072
-base_d_ff: 768
+head_dim: 72
+d_ff: 1728
+base_d_model: 144
+base_head_dim: 18
+base_d_ff: 432

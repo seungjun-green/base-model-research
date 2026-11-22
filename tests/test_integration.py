@@ -155,14 +155,14 @@ def test_preparation_pins_revisions_and_splits_whole_documents(tmp_path, monkeyp
             return {"input_ids": [[ord(char) % 7 for char in text] for text in texts]}
 
         def get_vocab(self):
-            return {str(i): i for i in range(8)}
+            return {str(i): i for i in range(32_000)}
 
         def save_pretrained(self, directory):
             Path(directory).mkdir(parents=True)
 
     monkeypatch.setattr(hub.HfApi, "dataset_info", lambda *a, **k: SimpleNamespace(sha="data-sha"))
     monkeypatch.setattr(hub.HfApi, "model_info", lambda *a, **k: SimpleNamespace(sha="tokenizer-sha"))
-    monkeypatch.setattr(transformers.AutoTokenizer, "from_pretrained", lambda *a, **k: Tokenizer())
+    monkeypatch.setattr(transformers.PreTrainedTokenizerFast, "from_pretrained", lambda *a, **k: Tokenizer())
     received = {}
 
     def load(*args, **kwargs):
@@ -192,6 +192,8 @@ def test_preparation_pins_revisions_and_splits_whole_documents(tmp_path, monkeyp
     assert sum(increments) == 26
     assert manifest["dataset_revision"] == received["revision"] == "data-sha"
     assert manifest["tokenizer_revision"] == "tokenizer-sha"
+    assert manifest["tokenizer"] == "TinyLlama/TinyLlama-1.1B-intermediate-step-1431k-3T"
+    assert manifest["tokenizer_max_id"] == 31_999
     assert manifest["splits"]["train"]["tokens"] == 26
     assert manifest["splits"]["validation"]["tokens"] == 4
     validation = TokenCorpus(output, "validation", verify=True)

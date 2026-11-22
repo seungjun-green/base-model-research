@@ -150,7 +150,7 @@ class ResearchLM(nn.Module):
     def loss_sum(self, input_ids, targets, chunk_size=128):
         """Summed FP32 CE over unmasked next-token targets.
 
-        Checkpoint each readout/loss chunk to avoid retaining B*S*151936 logits
+        Checkpoint each readout/loss chunk to avoid retaining B*S*vocab_size logits
         for backward. Recomputing the chunks trades compute for bounded memory.
         """
         hidden = self.hidden_states(input_ids).reshape(-1, self.config.d_model)

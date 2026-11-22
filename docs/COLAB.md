@@ -6,11 +6,11 @@ In hosted Colab, select **CPU** for notebook 01 and **RTX PRO 6000** for the
 other six notebooks. Run **Experiment storage** in each notebook and approve the Google Drive mount.
 The cell prints the experiment folder shared by all notebooks.
 
-Allow about 48 GB of runtime disk for corpus preparation or full main training,
+Allow about 12.7 GB of runtime disk for corpus preparation or full main training,
 plus room for download caches. FP32 model weights, gradients, and two Adam moments
-occupy roughly 9.6 GB for a 0.6B model before activations, logits, and overhead.
-Each main-model checkpoint uses about 7.2 GB on Drive for the FP32 weights and
-two Adam moments. Budget about 144 GB per main model, or 288 GB for both, plus the corpus.
+occupy roughly 2.5 GB for a main model before activations, logits, and overhead.
+Each main-model checkpoint uses about 1.9 GB on Drive for the FP32 weights and
+two Adam moments. Budget about 38 GB per main model, or 76 GB for both, plus the corpus.
 
 Notebook 00 reports the GPU, runs CPU correctness checks, records activation
 magnitudes across widths, and profiles all four models in one cell. If a profile
@@ -55,7 +55,7 @@ and must divide 128. For an existing sweep, use its recorded microbatch size.
 To run a fresh sweep with a different size, choose a new `EXPERIMENT` in the storage cell
 and use that name in subsequent notebooks for that experiment.
 The default enables only `RUN_SMOKE`, which trains trial 000 on 20 tokens per
-parameter (about 1.33 billion tokens) and validates 20 times. For the full search,
+parameter (about 267 million tokens) and validates 20 times. For the full search,
 set `RUN_SMOKE = False` and `RUN_FULL = True`. A completed trial 000 counts toward
 the 32, leaving 31 trials. Enabling both runs trial 000 first and then the remaining trials.
 
@@ -74,19 +74,20 @@ the main run restarts from its seed.
 
 Hosted notebooks use `drive.mount("/content/drive")`. Keep `USE_GOOGLE_DRIVE = True`
 in the **Experiment storage** cell. Notebook 01 prepares the corpus on the runtime SSD, then copies the
-tokenizer, manifest, and verified shards to `My Drive/bmr/data/fineweb_edu/`
-(about 48 GB). Before either proxy mode starts, the notebook copies the training shards
+tokenizer, manifest, and verified shards to `My Drive/bmr/data/fineweb_edu_tinyllama/`
+(about 12.7 GB). Before either proxy mode starts, the notebook copies the training shards
 covering its token budget and the validation split into `/content/bmr/data/proxy_shards/`
-(about 5.4 GB combined). Run **Copy proxy data from Google Drive to /content** after setup.
+(about 1.3 GB combined). Run **Copy proxy data from Google Drive to /content** after setup.
 Its tqdm bar shows how many shards are ready. All trials on that runtime read
-those local files, including experiments using an older pinned trainer. A fresh runtime
+those local files. A fresh runtime
 needs a fresh copy. If the full corpus is already prepared on the runtime, training uses it directly.
 Main training copies and verifies shards on first use. A resumed main run fetches the shards
-it needs from its saved token position. An older pinned main trainer copies the corpus to the SSD first.
+it needs from its saved token position. An existing, larger TinyLlama corpus works as well:
+each run reads only its assigned training prefix.
 If tokenization itself was interrupted, rerunning starts it again in a fresh temporary directory.
 Notebook 06 reads just the saved tokenizer.
 
-Run outputs go directly to `My Drive/bmr/runs/standard_vs_gated/`. To continue
+Run outputs go directly to `My Drive/bmr/runs/standard_vs_gated_160m_tinyllama/`. To continue
 an existing experiment, use its original folder name for `EXPERIMENT` in all notebooks.
 
 | Notebook | Output in the experiment folder |

@@ -85,7 +85,7 @@ def test_proxy_restarts_at_seed_and_never_saves_weights(
     assert [m["step"] for m in metrics] == list(range(1, reopened["step"] + 1))
 
 
-@pytest.mark.parametrize("steps", [5069, 5078, 45475, 45615, 11, 1])
+@pytest.mark.parametrize("steps", [1017, 1020, 12041, 12085, 11, 1])
 def test_one_pass_validation_schedule(steps):
     checks = sorted(validation_steps(steps, 20))
     assert len(checks) == min(20, steps)

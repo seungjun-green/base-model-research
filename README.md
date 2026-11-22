@@ -13,11 +13,14 @@ diagnostics must be checked on the target Blackwell runtime before full sweeps.*
 
 | Configuration | Unique parameters | Training targets (20× parameters) |
 |---|---:|---:|
-| Standard proxy | 66,437,120 | 1,328,742,400 |
-| Modified proxy | 66,551,808 | 1,331,036,160 |
-| Standard main | 596,049,920 | 11,920,998,400 |
-| Modified main | 597,884,928 | 11,957,698,560 |
+| Standard proxy | 13,326,336 | 266,526,720 |
+| Modified proxy | 13,362,624 | 267,252,480 |
+| Standard main | 157,814,784 | 3,156,295,680 |
+| Modified main | 158,395,392 | 3,167,907,840 |
 
+All four models use the 32,000-token [TinyLlama tokenizer](https://huggingface.co/TinyLlama/TinyLlama-1.1B-intermediate-step-1431k-3T).
+Regenerate FineWeb-Edu with notebook 01 for this experiment. Earlier Qwen-tokenized shards
+and checkpoints belong to the original experiment.
 All models have 28 layers, tied embeddings, QK normalization, RoPE, and SwiGLU.
 Attention projections use explicit head dimensions; query heads × head dimension
 does not have to equal hidden width. The modified layer implements the equations
@@ -45,7 +48,7 @@ Google Drive mount. Notebook 01 prepares the data on CPU. Use the GPU for notebo
 02–06. [Open notebook 00 in Colab](https://colab.research.google.com/github/seungjun-green/base-model-research/blob/main/notebooks/00_setup_and_checks.ipynb) · [Notebook order and run controls](docs/COLAB.md)
 
 To prepare the data on your Mac, open [local notebook 01](notebooks/local/01_prepare_data.ipynb)
-and select **Run All**. Drag the completed `~/Downloads/fineweb_edu` folder into
+and select **Run All**. Drag the completed `~/Downloads/fineweb_edu_tinyllama` folder into
 **My Drive → bmr → data** and continue with notebook 02 once the upload finishes.
 
 All seven notebooks use the selected Colab runtime's Python and PyTorch. Setup
@@ -69,9 +72,9 @@ python -m pytest -q
 ## Shared data and search
 
 ```bash
-bmr prepare-data --output data/fineweb_edu
-bmr sweep --model configs/models/standard_proxy.yaml --data data/fineweb_edu --output runs/proxy
-bmr sweep --model configs/models/modified_proxy.yaml --data data/fineweb_edu --output runs/proxy
+bmr prepare-data --output data/fineweb_edu_tinyllama
+bmr sweep --model configs/models/standard_proxy.yaml --data data/fineweb_edu_tinyllama --output runs/standard_vs_gated_160m_tinyllama/proxy
+bmr sweep --model configs/models/modified_proxy.yaml --data data/fineweb_edu_tinyllama --output runs/standard_vs_gated_160m_tinyllama/proxy
 ```
 
 `experiments/trials_seed42.json` is the committed list of 32 combinations. Its
@@ -90,7 +93,7 @@ uses every prepared held-out target token. No training-data shuffle is performed
 The fixed split is reproducible, not a claim that the first documents represent
 all of FineWeb-Edu; inspect it before committing to the full experiment.
 
-The training corpus occupies approximately 47.83 GB in uint32, plus validation,
+The training corpus occupies approximately 12.67 GB in uint32, plus validation,
 tokenizer files, caches, and checkpoints. Use the runtime's SSD for active reads.
 Rerun notebook 01 after an interruption. It reuses a completed corpus, retries
 tokenization from the beginning if necessary, and resumes a partial Drive copy.
@@ -99,11 +102,11 @@ tokenization from the beginning if necessary, and resumes a partial Drive copy.
 
 ```bash
 bmr train --model configs/models/standard_main.yaml \
-  --hyperparameters runs/proxy/standard/best_hparams.json \
-  --data data/fineweb_edu --output runs/main/standard
+  --hyperparameters runs/standard_vs_gated_160m_tinyllama/proxy/standard/best_hparams.json \
+  --data data/fineweb_edu_tinyllama --output runs/standard_vs_gated_160m_tinyllama/main/standard
 bmr train --model configs/models/modified_main.yaml \
-  --hyperparameters runs/proxy/modified/best_hparams.json \
-  --data data/fineweb_edu --output runs/main/modified
+  --hyperparameters runs/standard_vs_gated_160m_tinyllama/proxy/modified/best_hparams.json \
+  --data data/fineweb_edu_tinyllama --output runs/standard_vs_gated_160m_tinyllama/main/modified
 ```
 
 Use `--resume` to continue from the latest saved validation. Before the first save,
@@ -131,20 +134,20 @@ training-token position. `checkpoints/latest.json` identifies the latest complet
 save by step and SHA-256 checksum. The final save includes the last optimizer update.
 
 On hosted Colab, approve the Drive mount in **Experiment storage**. Checkpoints and
-results go to `My Drive/bmr/runs/standard_vs_gated/`. Notebook 01 saves the shared
+results go to `My Drive/bmr/runs/standard_vs_gated_160m_tinyllama/`. Notebook 01 saves the shared
 corpus under `My Drive/bmr/data/` for use across runtimes. The proxy smoke run
 trains trial 000 on its full 20-tokens-per-parameter budget. The full search
 reuses the completed trial. Both proxy notebooks copy the required training and validation
-shards (about 5.4 GB total) to the runtime SSD before training. Set `MICROBATCH_SIZE` near the top
+shards (about 1.3 GB total) to the runtime SSD before training. Set `MICROBATCH_SIZE` near the top
 of each proxy notebook. See [storage guidance](docs/COLAB.md) for
 the notebook outputs and the optional self-hosted backup configuration.
 
 ## Evaluation
 
 ```bash
-bmr benchmark --standard runs/main/standard/checkpoints \
-  --modified runs/main/modified/checkpoints --tokenizer data/fineweb_edu/tokenizer \
-  --output runs/benchmarks
+bmr benchmark --standard runs/standard_vs_gated_160m_tinyllama/main/standard/checkpoints \
+  --modified runs/standard_vs_gated_160m_tinyllama/main/modified/checkpoints --tokenizer data/fineweb_edu_tinyllama/tokenizer \
+  --output runs/standard_vs_gated_160m_tinyllama/benchmarks
 ```
 
 After both main runs finish, this evaluates each run's final checkpoint and the three pretrained

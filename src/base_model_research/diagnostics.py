@@ -12,10 +12,10 @@ from .training import autocast_context, environment_report, seed_everything
 
 DEFAULT_HP = Hyperparameters(0.001, 1.0, 1.0, 1.0, 1.0)
 EXPECTED_COUNTS = {
-    "standard_proxy": 66_437_120,
-    "modified_proxy": 66_551_808,
-    "standard_main": 596_049_920,
-    "modified_main": 597_884_928,
+    "standard_proxy": 13_326_336,
+    "modified_proxy": 13_362_624,
+    "standard_main": 157_814_784,
+    "modified_main": 158_395_392,
 }
 
 
@@ -63,12 +63,14 @@ def smoke_check(device="cpu"):
     return results
 
 
-def coordinate_check(config, output, device="cuda", widths=(128, 256, 512), steps=3):
+def coordinate_check(config, output, device="cuda", widths=None, steps=3):
     """Record activation magnitudes across widths; inspect for growth/collapse.
 
     This is a diagnostic, not a proof of mu-transfer for the modified architecture.
     It preserves the family's layer/head counts and proportional head/FFN widths.
     """
+    if widths is None:
+        widths = [config.base_d_model * multiple for multiple in (1, 2, 4)]
     records = []
     for width in widths:
         seed_everything(42)

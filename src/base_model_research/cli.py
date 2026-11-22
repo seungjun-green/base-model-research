@@ -40,7 +40,7 @@ def main():
         p.add_argument("--device", default="cuda")
         p.add_argument("--output", required=True)
         if name == "coordinate-check":
-            p.add_argument("--widths", nargs="+", type=int, default=[128, 256, 512])
+            p.add_argument("--widths", nargs="+", type=int, help="Default: 1×, 2×, and 4× the proxy width")
             p.add_argument("--steps", type=int, default=3)
             continue
         p.add_argument("--training", default="configs/training.yaml")

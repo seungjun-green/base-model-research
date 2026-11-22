@@ -6,7 +6,9 @@ from pathlib import Path
 
 import yaml
 
-DEFAULT_TRAINING_TARGETS = 11_957_698_560
+DEFAULT_TOKENIZER = "TinyLlama/TinyLlama-1.1B-intermediate-step-1431k-3T"
+TINYLLAMA_VOCAB_SIZE = 32_000
+DEFAULT_TRAINING_TARGETS = 3_167_907_840  # 20 targets per parameter in the largest main model.
 
 SHARED_TRAINING_FIELDS = (
     "context_length",
@@ -37,7 +39,7 @@ class ModelConfig:
     n_kv_heads: int
     head_dim: int
     d_ff: int
-    vocab_size: int = 151936
+    vocab_size: int = TINYLLAMA_VOCAB_SIZE
     base_d_model: int = 256
     base_head_dim: int = 32
     base_d_ff: int = 768

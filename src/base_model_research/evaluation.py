@@ -18,6 +18,7 @@ from .config import (
     json_fingerprint,
     load_mapping,
 )
+from .data import load_corpus_tokenizer
 from .parameterization import build_model
 from .storage import load_checkpoint
 from .training import autocast_context, environment_report
@@ -162,7 +163,6 @@ def benchmark(
 ):
     from huggingface_hub import HfApi
     from lm_eval import simple_evaluate
-    from transformers import AutoTokenizer
 
     settings = load_mapping(config_path)
     output = Path(output)
@@ -211,10 +211,12 @@ def benchmark(
             if comparison_protocol is not None and protocol != comparison_protocol:
                 raise ValueError("Main models used different datasets or shared training settings")
             comparison_protocol = protocol
-            tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, local_files_only=True)
             tokenizer_metadata = json.loads((Path(tokenizer_path).parent / "manifest.json").read_text())
             if tokenizer_metadata["fingerprint"] != payload["identity"]["data_fingerprint"]:
                 raise ValueError("Tokenizer dataset manifest differs from the training run")
+            tokenizer = load_corpus_tokenizer(
+                tokenizer_path, tokenizer_name=tokenizer_metadata.get("tokenizer"), local_files_only=True
+            )
             adapter = make_harness_model(model, tokenizer, settings["max_length"], settings["precision"])
             checkpoint_identity = {
                 "run_fingerprint": payload["fingerprint"],
