@@ -129,7 +129,8 @@ save by step and SHA-256 checksum. The final save includes the last optimizer up
 On hosted Colab, approve the Drive mount in **Experiment storage**. Checkpoints and
 results go to `My Drive/bmr/runs/standard_vs_gated/`. Notebook 01 saves the shared
 corpus under `My Drive/bmr/data/` for use across runtimes. The proxy smoke run
-reads its shards directly from Drive. Full training caches each shard on the
+trains trial 000 on its full 20-tokens-per-parameter budget. The full search
+reuses the completed trial. Both modes cache each shard on the
 runtime SSD the first time it needs that shard. See [storage guidance](docs/COLAB.md) for
 the notebook outputs and the optional self-hosted backup configuration.
 

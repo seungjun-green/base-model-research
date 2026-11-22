@@ -58,10 +58,10 @@ TRAINING_LAUNCHER = """
     sys.path.insert(0, str(REPO / "src"))
     from base_model_research.progress import run_with_progress
 
-    def training_data(*, local_copy=True):
+    def training_data():
         if not (SAVED_DATA / "manifest.json").is_file():
             raise FileNotFoundError(f"Run notebook 01 to prepare the shared dataset at {SAVED_DATA}.")
-        if not local_copy or SAVED_DATA == DATA:
+        if SAVED_DATA == DATA:
             return ["--data", SAVED_DATA]
         if not (DATA / "manifest.json").is_file():
             from inspect import signature
@@ -190,14 +190,14 @@ for family, number in (("standard", "02"), ("modified", "03")):
             code(f"""
             FAMILY_RUNS = RUNS / "proxy" / "{family}"
 
-            def run_proxy(data_options, *options):
+            def run_proxy(*options):
                 run_training("sweep", "{family}_proxy", FAMILY_RUNS / "protocol.json",
-                    *data_options, "--output", RUNS / "proxy", *options)
+                    *training_data(), "--output", RUNS / "proxy", *options)
         """),
             code("""
-            # Smoke run · one proxy model, up to 10 optimizer updates
+            # Smoke run · train trial 000 on 20 tokens per parameter
             if RUN_SMOKE:
-                run_proxy(training_data(local_copy=False), "--start", 0, "--end", 1, "--stop-after-updates", 10)
+                run_proxy("--end", 1)
                 result = json.loads((FAMILY_RUNS / "trial_000" / "result.json").read_text())
                 print(f"Trial 000 is {result['status']} at step {result['step']}.")
             else:
@@ -206,7 +206,7 @@ for family, number in (("standard", "02"), ("modified", "03")):
             code("""
             # Full run · all 32 trials
             if RUN_FULL:
-                run_proxy(training_data())
+                run_proxy()
                 winner = FAMILY_RUNS / "best_hparams.json"
                 if winner.exists():
                     best = json.loads(winner.read_text())
@@ -223,9 +223,8 @@ for family, number in (("standard", "02"), ("modified", "03")):
             # Run controls
             RUN_SMOKE = True
             RUN_FULL = False
-            # Smoke tests 10 updates of trial 000. Proxy trials save metrics only.
-            # Full starts unfinished trials from their seed and skips completed trials.
-            # Enabling both runs smoke first, then full. Disabling both skips training.
+            # RUN_SMOKE trains one full trial (~1.33B tokens, 20 validations).
+            # RUN_FULL runs the 32-trial search and skips completed trials, including trial 000.
         """),
     )
 

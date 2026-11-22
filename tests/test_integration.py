@@ -286,13 +286,13 @@ def test_colab_uses_kernel_python_and_preserves_torch(tmp_path, monkeypatch, ben
 
 
 @pytest.mark.parametrize("family", ["standard", "modified"])
-def test_proxy_notebook_smoke_then_full_uses_the_same_trial(
+def test_proxy_notebook_smoke_finishes_one_trial_and_full_skips_it(
     tmp_path, corpus, tiny_config, training_config, family
 ):
     notebook = next(Path("notebooks").glob(f"*_{family}_proxy_search.ipynb"))
     cells = [cell["source"] for cell in json.loads(notebook.read_text())["cells"]]
     search = tmp_path / "search.yaml"
-    search.write_text(yaml.safe_dump({**load_mapping("configs/search.yaml"), "trials": 1}))
+    search.write_text(yaml.safe_dump({**load_mapping("configs/search.yaml"), "trials": 2}))
     trials = tmp_path / "trials.json"
     generate_trials(search, trials)
     cached = tmp_path / "ssd"
@@ -305,16 +305,16 @@ def test_proxy_notebook_smoke_then_full_uses_the_same_trial(
         data = Path(command[command.index("--data") + 1])
         cache = Path(command[command.index("--cache-dir") + 1]) if "--cache-dir" in command else None
         paths.append((data, cache))
-        limited = "--stop-after-updates" in command
+        assert "--stop-after-updates" not in command
         sweep(
             replace(tiny_config, family=family),
-            replace(training_config, tokens_per_parameter=5),
+            replace(training_config, tokens_per_parameter=20),
             data,
             command[command.index("--output") + 1],
             trials,
             device="cpu",
             cache_dir=cache,
-            stop_after_updates=int(command[command.index("--stop-after-updates") + 1]) if limited else None,
+            end=int(command[command.index("--end") + 1]) if "--end" in command else None,
         )
 
     env = {
@@ -341,19 +341,26 @@ def test_proxy_notebook_smoke_then_full_uses_the_same_trial(
     exec(setup[setup.index("def training_data(") :], env)  # noqa: S102 - generated notebook functions
     run_cell("def run_proxy(")
     run_cell("if RUN_SMOKE:")
-    result_path = env["FAMILY_RUNS"] / "trial_000" / "result.json"
-    paused = json.loads(result_path.read_text())
-    assert paused["status"] == "paused" and paused["step"] == 10
-    assert paused["checkpoint"] is None
-    assert paths == [(corpus, None)] and not (tmp_path / "cached_shards").exists()
+    family_runs = env["FAMILY_RUNS"]
+    first_trial = family_runs / "trial_000"
+    second_trial = family_runs / "trial_001"
+    result_path = first_trial / "result.json"
+    result = json.loads(result_path.read_text())
+    run = json.loads((first_trial / "run.json").read_text())
+    assert result["status"] == "complete" and result["step"] == run["total_steps"]
+    assert result["consumed_tokens"] == 20 * run["parameters"]
+    metrics = [json.loads(line) for line in (first_trial / "metrics.jsonl").read_text().splitlines()]
+    assert sum("validation_loss" in row for row in metrics) == 20
+    assert not second_trial.exists() and not (family_runs / "best_hparams.json").exists()
+    first_save = result_path.stat().st_mtime_ns
+    assert paths == [(corpus, tmp_path / "cached_shards")]
     profile.write_text(json.dumps({"training": {"microbatch_size": 1, "activation_checkpointing": True}}))
     run_cell("if RUN_FULL:")
-    finished = json.loads(result_path.read_text())
-    assert paths == [(corpus, None), (corpus, tmp_path / "cached_shards")]
-    assert finished["status"] == "complete" and not cached.exists()
-    assert paused["fingerprint"] == finished["fingerprint"]
-    assert not list(env["FAMILY_RUNS"].rglob("*.pt"))
-    assert (env["FAMILY_RUNS"] / "best_hparams.json").is_file()
+    assert result_path.stat().st_mtime_ns == first_save
+    assert json.loads((second_trial / "result.json").read_text())["status"] == "complete"
+    assert paths == [(corpus, tmp_path / "cached_shards")] * 2
+    assert not cached.exists() and not list(family_runs.rglob("*.pt"))
+    assert (family_runs / "best_hparams.json").is_file()
 
 
 def test_changed_sweep_stops_before_starting_next_trial(tmp_path, corpus, training_config, tiny_config):

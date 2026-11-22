@@ -46,7 +46,8 @@ def training_config():
 def corpus(tmp_path):
     root = tmp_path / "tokens"
     splits = {}
-    for split, n in (("train", 4097), ("validation", 35)):
+    # The 208-parameter gated fixture needs 20 targets per parameter plus one lookahead token.
+    for split, n in (("train", 20 * 208 + 1), ("validation", 35)):
         writer = TokenWriter(root, split, shard_tokens=31)
         writer.write(np.arange(n) % 8)
         splits[split] = writer.finish()

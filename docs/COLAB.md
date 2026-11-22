@@ -50,19 +50,17 @@ reopens the saved experiment. All notebooks launch the same Python package.
 7. `06_benchmarks.ipynb`: run the five-model comparison.
 
 In notebooks 02 and 03, edit `RUN_SMOKE` and `RUN_FULL` directly in the **Run controls** cell, then run all cells.
-The default enables only `RUN_SMOKE`, which tests trial 000 for up to ten optimizer
-updates. Smoke reads the needed token shards directly from the corpus saved by
-notebook 01. For the full search, set `RUN_SMOKE = False` and `RUN_FULL = True`. The full search
-starts trial 000 again at step zero. Enabling both runs them in order.
+The default enables only `RUN_SMOKE`, which trains trial 000 on 20 tokens per
+parameter (about 1.33 billion tokens) and validates 20 times. For the full search,
+set `RUN_SMOKE = False` and `RUN_FULL = True`. A completed trial 000 counts toward
+the 32, leaving 31 trials. Enabling both runs trial 000 first and then the remaining trials.
 
 Notebooks 02–05 display a tqdm bar for optimizer updates with training loss, tokens
-per second, and estimated time remaining. Smoke runs count the updates requested
-for that invocation. A resumed main run starts the bar at its saved step.
+per second, and estimated time remaining. A resumed main run starts the bar at its saved step.
 The full proxy searches also show how many of the 32 trials have finished.
 
 Use one training process per GPU. Every full trial or main run validates on the same
-held-out split at 5%, 10%, …, 100% of its one-pass budget. A ten-step production
-smoke run ends before the first scheduled validation. Reopening a sweep skips
+held-out split at 5%, 10%, …, 100% of its one-pass budget. Reopening a sweep skips
 terminal trials. An unfinished proxy trial restarts from its seed. Rerunning
 notebook 04 or 05 restores the latest main checkpoint and continues with the next
 optimizer update. Work since that save is repeated. Before the first validation,
