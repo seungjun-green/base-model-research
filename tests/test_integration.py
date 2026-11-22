@@ -293,60 +293,70 @@ def test_colab_uses_kernel_python_and_preserves_torch(tmp_path, monkeypatch, ben
 
 @pytest.mark.parametrize("family", ["standard", "modified"])
 def test_proxy_notebook_smoke_finishes_one_trial_and_full_skips_it(
-    tmp_path, corpus, tiny_config, training_config, family
+    tmp_path, corpus, tiny_config, training_config, family, monkeypatch
 ):
-    notebook = next(Path("notebooks").glob(f"*_{family}_proxy_search.ipynb"))
-    cells = [cell["source"] for cell in json.loads(notebook.read_text())["cells"]]
+    from dataclasses import asdict
+
+    from base_model_research import progress
+
+    path = next(Path("notebooks").glob(f"*_{family}_proxy_search.ipynb"))
+    cells = [c["source"] for c in json.loads(path.read_text())["cells"] if c["cell_type"] == "code"]
+    assert 'drive.mount("/content/drive")' in cells[0]
+    model = replace(tiny_config, family=family)
+    training = replace(training_config, tokens_per_parameter=20)
+    config_dir = tmp_path / "configs"
+    (config_dir / "models").mkdir(parents=True)
+    (config_dir / "models" / f"{family}_proxy.yaml").write_text(yaml.safe_dump(asdict(model)))
+    (config_dir / "training.yaml").write_text(yaml.safe_dump(asdict(training)))
     search = tmp_path / "search.yaml"
     search.write_text(yaml.safe_dump({**load_mapping("configs/search.yaml"), "trials": 2}))
     trials = tmp_path / "trials.json"
     generate_trials(search, trials)
-    cached = tmp_path / "ssd"
-    paths = []
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    # A notebook override must take precedence over the profile.
+    profile = runs / f"{family}_proxy_profile.json"
+    profile.write_text(json.dumps({"training": {"microbatch_size": 1, "activation_checkpointing": False}}))
+
+    calls = []
 
     def run_with_progress(command, *, cwd):
-        assert "sweep" in command
-        assert command[command.index("--microbatch-size") + 1] == "2"
-        assert "--activation-checkpointing" not in command
         data = Path(command[command.index("--data") + 1])
-        cache = Path(command[command.index("--cache-dir") + 1]) if "--cache-dir" in command else None
-        paths.append((data, cache))
-        assert "--stop-after-updates" not in command
+        size = int(command[command.index("--microbatch-size") + 1])
+        assert data.is_relative_to(tmp_path / "runtime")
+        assert data != corpus and size == 2 and "--cache-dir" not in command
+        assert "--stop-after-updates" not in command and "--activation-checkpointing" not in command
+        calls.append(data)
         sweep(
-            replace(tiny_config, family=family),
-            replace(training_config, tokens_per_parameter=20),
+            model,
+            replace(training, microbatch_size=size),
             data,
             command[command.index("--output") + 1],
             trials,
             device="cpu",
-            cache_dir=cache,
             end=int(command[command.index("--end") + 1]) if "--end" in command else None,
         )
 
+    monkeypatch.setattr(progress, "run_with_progress", run_with_progress)
     env = {
-        "RUNS": tmp_path / "runs",
+        "RUNS": runs,
         "SAVED_DATA": corpus,
-        "DATA": cached,
-        "REPO": Path("."),
+        "DATA": tmp_path / "runtime" / "fineweb_edu",
+        "REPO": tmp_path,
         "sys": sys,
         "json": json,
-        "RUN_SMOKE": True,
-        "RUN_FULL": True,
-        "run_with_progress": run_with_progress,
-        "run": lambda *args: pytest.fail(f"Unexpected whole-corpus copy: {args}"),
     }
 
-    def run_cell(marker):
-        source = next(cell for cell in cells if marker in cell)
-        exec(compile(source, str(notebook), "exec"), env)  # noqa: S102 - run the generated notebook cell
+    def execute(source):
+        exec(compile(source, str(path), "exec"), env)  # noqa: S102 - generated notebook code
 
-    env["RUNS"].mkdir()
-    profile = env["RUNS"] / f"{family}_proxy_profile.json"
-    profile.write_text(json.dumps({"training": {"microbatch_size": 2, "activation_checkpointing": False}}))
-    setup = next(cell for cell in cells if "def training_data(" in cell)
-    exec(setup[setup.index("def training_data(") :], env)  # noqa: S102 - generated notebook functions
-    run_cell("def run_proxy(")
-    run_cell("if RUN_SMOKE:")
+    execute(cells[1])
+    assert env["MICROBATCH_SIZE"] == 4
+    env.update(MICROBATCH_SIZE=2, RUN_FULL=True)
+    # Skip checkout and pip installation, as Colab setup has its own test.
+    execute(cells[2][cells[2].index("sys.path.insert(") :])
+    execute(cells[3])
+    execute(cells[4])
     family_runs = env["FAMILY_RUNS"]
     first_trial = family_runs / "trial_000"
     second_trial = family_runs / "trial_001"
@@ -355,61 +365,67 @@ def test_proxy_notebook_smoke_finishes_one_trial_and_full_skips_it(
     run = json.loads((first_trial / "run.json").read_text())
     assert result["status"] == "complete" and result["step"] == run["total_steps"]
     assert result["consumed_tokens"] == 20 * run["parameters"]
+    assert run["data_fingerprint"] == TokenCorpus(corpus, "train").fingerprint
     metrics = [json.loads(line) for line in (first_trial / "metrics.jsonl").read_text().splitlines()]
     assert sum("validation_loss" in row for row in metrics) == 20
     assert not second_trial.exists() and not (family_runs / "best_hparams.json").exists()
     first_save = result_path.stat().st_mtime_ns
-    assert paths == [(corpus, tmp_path / "cached_shards")]
+
+    # A fresh session must keep the saved activation setting and refuse to mix microbatch sizes.
     profile.write_text(json.dumps({"training": {"microbatch_size": 1, "activation_checkpointing": True}}))
-    run_cell("if RUN_FULL:")
+    env["MICROBATCH_SIZE"] = 1
+    with pytest.raises(ValueError, match="sweep uses MICROBATCH_SIZE = 2"):
+        execute(cells[5])
+    env["MICROBATCH_SIZE"] = 2
+    execute(cells[5])
     assert result_path.stat().st_mtime_ns == first_save
     assert json.loads((second_trial / "result.json").read_text())["status"] == "complete"
-    assert paths == [(corpus, tmp_path / "cached_shards")] * 2
-    assert not cached.exists() and not list(family_runs.rglob("*.pt"))
+    assert len(calls) == 2 and calls[0] == calls[1]
+    assert not list(family_runs.rglob("*.pt"))
     assert (family_runs / "best_hparams.json").is_file()
 
 
-@pytest.mark.parametrize("family", ["standard", "modified"])
-def test_both_proxy_modes_read_drive_when_pinned_trainer_lacks_shard_cache(
-    tmp_path, corpus, monkeypatch, capsys, family
-):
-    from base_model_research import data
+def test_proxy_stages_only_its_prefix_and_validation_and_recovers_bad_copies(tmp_path, corpus, monkeypatch):
+    import runpy
+    import shutil
 
-    path = next(Path("notebooks").glob(f"*_{family}_proxy_search.ipynb"))
-    cells = json.loads(path.read_text())["cells"]
-    setup = next(cell["source"] for cell in cells if "def training_data(" in cell["source"])
-    local = tmp_path / "ssd"
-    copies = []
-    env = {
-        "RUNS": tmp_path / "runs",
-        "SAVED_DATA": corpus,
-        "DATA": local,
-        "run": lambda *args: copies.append(args),
-    }
-    exec(setup[setup.index("def training_data(") :], env)  # noqa: S102 - generated notebook functions
-    monkeypatch.setattr(data, "TokenCorpus", lambda root, split: None)  # Signature before --cache-dir.
+    stage = runpy.run_path("scripts/colab_proxy.py")["stage_proxy_data"]
+    data = tmp_path / "runtime" / "fineweb_edu"
+    copied = []
+    copyfile = shutil.copyfile
 
-    launches = []
-    env["run_training"] = lambda *args: launches.append(args)
-    proxy_cell = next(cell["source"] for cell in cells if "def run_proxy(" in cell["source"])
-    exec(proxy_cell, env)  # noqa: S102 - generated notebook function
-    env["run_proxy"](first_only=True)
-    env["run_proxy"]()
-    expected = (
-        "sweep",
-        f"{family}_proxy",
-        env["FAMILY_RUNS"] / "protocol.json",
-        "--data",
-        corpus,
-        "--output",
-        env["RUNS"] / "proxy",
+    def copy(src, dst):
+        copied.append(src.name)
+        if len(copied) == 2:
+            Path(dst).write_bytes(b"partial")
+            return
+        return copyfile(src, dst)
+
+    monkeypatch.setattr(shutil, "copyfile", copy)
+    # A 31-target budget ends exactly at a shard boundary; the next shard supplies the lookahead.
+    with pytest.raises(ValueError, match="checksum mismatch"):
+        stage(corpus, data, 31)
+    assert copied == ["train-00000.bin", "train-00001.bin"]
+    local = stage(corpus, data, 31)
+    assert copied == [
+        "train-00000.bin",
+        "train-00001.bin",
+        "train-00001.bin",
+        "validation-00000.bin",
+        "validation-00001.bin",
+    ]
+    assert not (local / "train-00001.bin").is_symlink()
+    assert (local / "train-00002.bin").is_symlink()
+    assert (local / "manifest.json").read_bytes() == (corpus / "manifest.json").read_bytes()
+    copied.clear()
+    stage(corpus, data, 31)
+    assert not copied
+    stage(corpus, data, 62)
+    assert copied == ["train-00002.bin"] and not (local / "train-00002.bin").is_symlink()
+    # The original trainer checks all shard sizes; every path in its manifest must still resolve.
+    assert (
+        TokenCorpus(local, "train").read(0, 63).tolist() == TokenCorpus(corpus, "train").read(0, 63).tolist()
     )
-    assert launches == [(*expected, "--end", 1), expected]
-    assert not copies
-    assert "directly from Google Drive" in capsys.readouterr().out
-    assert env["training_data"]() == ["--data", local]
-    assert copies == [("copy-data", "--source", corpus, "--destination", local)]
-    assert "about 48 GB" in capsys.readouterr().out
 
 
 def test_changed_sweep_stops_before_starting_next_trial(tmp_path, corpus, training_config, tiny_config):

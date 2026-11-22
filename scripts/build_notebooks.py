@@ -118,16 +118,24 @@ def write_notebook(name, cells, metadata):
     path.write_text(json.dumps(content, indent=2) + "\n")
 
 
-def notebook(name, title, cells, *, controls=None, training=False, benchmark=False, gpu=True):
+def notebook(name, title, cells, *, proxy_controls=None, training=False, benchmark=False, gpu=True):
     setup = (ROOT / "scripts" / "colab_setup.py").read_text()
     bootstrap = (
         "# Set up experiment runtime\n"
         + setup
         + f"\nREPO = setup_colab(WORKSPACE, RUNS, benchmark={benchmark})\n"
-        + textwrap.dedent(BOOTSTRAP)
     )
-    if training:
-        bootstrap += textwrap.dedent(TRAINING_LAUNCHER)
+    if proxy_controls is not None:
+        bootstrap += textwrap.dedent("""
+            sys.path.insert(0, str(REPO / "src"))
+            from base_model_research.progress import run_with_progress
+
+        """)
+        bootstrap += (ROOT / "scripts" / "colab_proxy.py").read_text()
+    else:
+        bootstrap += textwrap.dedent(BOOTSTRAP)
+        if training:
+            bootstrap += textwrap.dedent(TRAINING_LAUNCHER)
     runtime = "Select the RTX PRO 6000 GPU" if gpu else "Select a CPU runtime"
     write_notebook(
         name,
@@ -136,8 +144,8 @@ def notebook(name, title, cells, *, controls=None, training=False, benchmark=Fal
                 f"# {title}\n\n{runtime} in Colab, run the cells in order, "
                 "and approve the Google Drive mount when prompted."
             ),
-            *([controls] if controls is not None else []),
             STORAGE,
+            *([proxy_controls] if proxy_controls is not None else []),
             code(bootstrap),
             *cells,
         ],
@@ -275,9 +283,11 @@ for family, number in (("standard", "02"), ("modified", "03")):
             FAMILY_RUNS = RUNS / "proxy" / "{family}"
 
             def run_proxy(*, first_only=False):
+                sweep_args = proxy_sweep_args(REPO, RUNS, "{family}", MICROBATCH_SIZE, SAVED_DATA, DATA)
                 options = ["--end", 1] if first_only else []
-                run_training("sweep", "{family}_proxy", FAMILY_RUNS / "protocol.json",
-                    *training_data(proxy=True), "--output", RUNS / "proxy", *options)
+                print("Starting the {family} proxy trainer…", flush=True)
+                run_with_progress([sys.executable, "-u", "-m", "base_model_research.cli", "sweep",
+                                   *sweep_args, *map(str, options)], cwd=REPO)
         """),
             code("""
             # Smoke run · train trial 000 on 20 tokens per parameter
@@ -303,9 +313,9 @@ for family, number in (("standard", "02"), ("modified", "03")):
                 print("Full run disabled.")
         """),
         ],
-        training=True,
-        controls=code("""
+        proxy_controls=code("""
             # Run controls
+            MICROBATCH_SIZE = 4  # Sequences per GPU microbatch. Choose a divisor of 128.
             RUN_SMOKE = True
             RUN_FULL = False
             # RUN_SMOKE trains one full trial (~1.33B tokens, 20 validations).

@@ -15,8 +15,8 @@ two Adam moments. Budget about 144 GB per main model, or 288 GB for both, plus t
 Notebook 00 reports the GPU, runs CPU correctness checks, records activation
 magnitudes across widths, and profiles all four models in one cell. If a profile
 runs out of memory, reduce `MICROBATCH_SIZE` in that cell and rerun it. New training
-runs read their model's memory settings from its saved profile. An existing run
-keeps the settings it started with. The global batch size stays at 128.
+runs use the profile's activation checkpointing setting. Main runs also use the profiled
+microbatch size. Each proxy notebook has its own microbatch control. The global batch size stays at 128.
 
 ## GitHub and environment
 
@@ -49,7 +49,11 @@ reopens the saved experiment. All notebooks launch the same Python package.
 6. `05_train_modified_main.ipynb`: transfer the modified winning settings.
 7. `06_benchmarks.ipynb`: run the five-model comparison.
 
-In notebooks 02 and 03, edit `RUN_SMOKE` and `RUN_FULL` directly in the **Run controls** cell, then run all cells.
+In notebooks 02 and 03, the first code cell mounts Google Drive. In the next cell,
+set `MICROBATCH_SIZE`, `RUN_SMOKE`, and `RUN_FULL`. The microbatch defaults to 4 sequences
+and must divide 128. For an existing sweep, use its recorded microbatch size.
+To run a fresh sweep with a different size, choose a new `EXPERIMENT` in the storage cell
+and use that name in subsequent notebooks for that experiment.
 The default enables only `RUN_SMOKE`, which trains trial 000 on 20 tokens per
 parameter (about 1.33 billion tokens) and validates 20 times. For the full search,
 set `RUN_SMOKE = False` and `RUN_FULL = True`. A completed trial 000 counts toward
@@ -71,14 +75,13 @@ the main run restarts from its seed.
 Hosted notebooks use `drive.mount("/content/drive")`. Keep `USE_GOOGLE_DRIVE = True`
 in the **Experiment storage** cell. Notebook 01 prepares the corpus on the runtime SSD, then copies the
 tokenizer, manifest, and verified shards to `My Drive/bmr/data/fineweb_edu/`
-(about 48 GB). On a fresh VM, full training copies and verifies each shard
-when it first reads it. A full proxy search needs about 5.4 GB of training shards
-plus the validation split. Later trials on the same VM reuse those local files.
-A resumed main run fetches the shards it needs from its saved token position.
-If notebook 01 already prepared the full corpus on that VM, training uses it directly.
-With an older pinned trainer that lacks shard caching, both proxy modes read the needed
-shards directly from mounted Drive on a fresh VM. Main runs using that older trainer
-copy the corpus to the SSD first. The notebook prints which path it takes before launching training.
+(about 48 GB). Before either proxy mode starts, the notebook copies the training shards
+covering its token budget and the validation split into `/content/bmr/data/proxy_shards/`
+(about 5.4 GB combined). The copy shows a progress bar. All trials on that runtime read
+those local files, including experiments using an older pinned trainer. A fresh runtime
+needs a fresh copy. If the full corpus is already prepared on the runtime, training uses it directly.
+Main training copies and verifies shards on first use. A resumed main run fetches the shards
+it needs from its saved token position. An older pinned main trainer copies the corpus to the SSD first.
 If tokenization itself was interrupted, rerunning starts it again in a fresh temporary directory.
 Notebook 06 reads just the saved tokenizer.
 

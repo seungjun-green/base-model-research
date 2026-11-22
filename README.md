@@ -134,8 +134,9 @@ On hosted Colab, approve the Drive mount in **Experiment storage**. Checkpoints 
 results go to `My Drive/bmr/runs/standard_vs_gated/`. Notebook 01 saves the shared
 corpus under `My Drive/bmr/data/` for use across runtimes. The proxy smoke run
 trains trial 000 on its full 20-tokens-per-parameter budget. The full search
-reuses the completed trial. Both modes cache the shards they use on the runtime SSD
-if the trainer supports caching. Older trainers read them directly from Drive. See [storage guidance](docs/COLAB.md) for
+reuses the completed trial. Both proxy notebooks copy the required training and validation
+shards (about 5.4 GB total) to the runtime SSD before training. Set `MICROBATCH_SIZE` near the top
+of each proxy notebook. See [storage guidance](docs/COLAB.md) for
 the notebook outputs and the optional self-hosted backup configuration.
 
 ## Evaluation
