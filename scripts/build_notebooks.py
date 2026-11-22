@@ -280,10 +280,15 @@ for family, number in (("standard", "02"), ("modified", "03")):
         f"{family.title()} proxy: 32 shared trials",
         [
             code(f"""
+            # Copy proxy data from Google Drive to /content
+            PROXY_DATA = stage_proxy_data(SAVED_DATA, DATA, proxy_training_targets(REPO, "{family}"))
+            print(f"Proxy data ready at {{PROXY_DATA}}.")
+        """),
+            code(f"""
             FAMILY_RUNS = RUNS / "proxy" / "{family}"
 
             def run_proxy(*, first_only=False):
-                sweep_args = proxy_sweep_args(REPO, RUNS, "{family}", MICROBATCH_SIZE, SAVED_DATA, DATA)
+                sweep_args = proxy_sweep_args(REPO, RUNS, "{family}", MICROBATCH_SIZE, PROXY_DATA)
                 options = ["--end", 1] if first_only else []
                 print("Starting the {family} proxy trainer…", flush=True)
                 run_with_progress([sys.executable, "-u", "-m", "base_model_research.cli", "sweep",

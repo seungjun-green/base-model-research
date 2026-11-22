@@ -356,7 +356,10 @@ def test_proxy_notebook_smoke_finishes_one_trial_and_full_skips_it(
     # Skip checkout and pip installation, as Colab setup has its own test.
     execute(cells[2][cells[2].index("sys.path.insert(") :])
     execute(cells[3])
+    assert env["PROXY_DATA"].is_dir() and not calls
+    env["stage_proxy_data"] = lambda *args: pytest.fail("Training tried to stage the data again")
     execute(cells[4])
+    execute(cells[5])
     family_runs = env["FAMILY_RUNS"]
     first_trial = family_runs / "trial_000"
     second_trial = family_runs / "trial_001"
@@ -375,9 +378,9 @@ def test_proxy_notebook_smoke_finishes_one_trial_and_full_skips_it(
     profile.write_text(json.dumps({"training": {"microbatch_size": 1, "activation_checkpointing": True}}))
     env["MICROBATCH_SIZE"] = 1
     with pytest.raises(ValueError, match="sweep uses MICROBATCH_SIZE = 2"):
-        execute(cells[5])
+        execute(cells[6])
     env["MICROBATCH_SIZE"] = 2
-    execute(cells[5])
+    execute(cells[6])
     assert result_path.stat().st_mtime_ns == first_save
     assert json.loads((second_trial / "result.json").read_text())["status"] == "complete"
     assert len(calls) == 2 and calls[0] == calls[1]

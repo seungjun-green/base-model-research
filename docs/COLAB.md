@@ -77,7 +77,8 @@ in the **Experiment storage** cell. Notebook 01 prepares the corpus on the runti
 tokenizer, manifest, and verified shards to `My Drive/bmr/data/fineweb_edu/`
 (about 48 GB). Before either proxy mode starts, the notebook copies the training shards
 covering its token budget and the validation split into `/content/bmr/data/proxy_shards/`
-(about 5.4 GB combined). The copy shows a progress bar. All trials on that runtime read
+(about 5.4 GB combined). Run **Copy proxy data from Google Drive to /content** after setup.
+Its tqdm bar shows how many shards are ready. All trials on that runtime read
 those local files, including experiments using an older pinned trainer. A fresh runtime
 needs a fresh copy. If the full corpus is already prepared on the runtime, training uses it directly.
 Main training copies and verifies shards on first use. A resumed main run fetches the shards

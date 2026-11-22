@@ -61,7 +61,15 @@ def stage_proxy_data(source, data, training_targets):
     return local
 
 
-def proxy_sweep_args(repo, runs, family, microbatch_size, source, data):
+def proxy_training_targets(repo, family):
+    model = ModelConfig.load(repo / "configs" / "models" / f"{family}_proxy.yaml")
+    config = TrainConfig.load(repo / "configs" / "training.yaml")
+    with torch.device("meta"):
+        parameters = parameter_count(ResearchLM(model, DEFAULT_HP))
+    return parameters * config.tokens_per_parameter
+
+
+def proxy_sweep_args(repo, runs, family, microbatch_size, local):
     model_name = f"{family}_proxy"
     model_path = repo / "configs" / "models" / f"{model_name}.yaml"
     if type(microbatch_size) is not int:
@@ -75,11 +83,8 @@ def proxy_sweep_args(repo, runs, family, microbatch_size, source, data):
             f"This {family} sweep uses MICROBATCH_SIZE = {settings['microbatch_size']}. "
             f"Use that value to continue, or set a new EXPERIMENT name to start a sweep at {microbatch_size}."
         )
-    with torch.device("meta"):
-        parameters = parameter_count(ResearchLM(ModelConfig.load(model_path), DEFAULT_HP))
     accumulation = config.global_batch_size // microbatch_size
     print(f"{model_name}: {accumulation} microbatches of {microbatch_size} sequences per update.", flush=True)
-    local = stage_proxy_data(source, data, parameters * config.tokens_per_parameter)
     args = [
         "--model",
         str(model_path),
