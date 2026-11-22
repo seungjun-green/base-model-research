@@ -21,30 +21,32 @@ def code(text):
     }
 
 
-STORAGE = code("""
-    # Experiment storage
-    USE_GOOGLE_DRIVE = True
+def storage_cell(experiment, data_folder):
+    return code(f"""
+        # Experiment storage
+        USE_GOOGLE_DRIVE = True
 
-    from pathlib import Path
-    import os
+        from pathlib import Path
+        import os
 
-    default_workspace = "/content/bmr" if Path("/content").is_dir() else "~/bmr-workspace"
-    WORKSPACE = Path(os.environ.get("BMR_WORKSPACE", default_workspace)).expanduser().resolve()
-    EXPERIMENT = "standard_vs_gated_160m_tinyllama"
-    DATA = WORKSPACE / "data" / "fineweb_edu_tinyllama"
-    if USE_GOOGLE_DRIVE:
-        from google.colab import drive
-        drive.mount("/content/drive")
-        my_drive = Path("/content/drive/MyDrive")
-        if not my_drive.is_dir():
-            raise RuntimeError("Mount Google Drive before continuing.")
-        storage = my_drive / "bmr"
-    else:
-        storage = WORKSPACE
-    RUNS = storage / "runs" / EXPERIMENT
-    SAVED_DATA = storage / "data" / "fineweb_edu_tinyllama"
-    print("Experiment outputs:", RUNS)
-""")
+        default_workspace = "/content/bmr" if Path("/content").is_dir() else "~/bmr-workspace"
+        WORKSPACE = Path(os.environ.get("BMR_WORKSPACE", default_workspace)).expanduser().resolve()
+        EXPERIMENT = "{experiment}"
+        DATA = WORKSPACE / "data" / "{data_folder}"
+        if USE_GOOGLE_DRIVE:
+            from google.colab import drive
+            drive.mount("/content/drive")
+            my_drive = Path("/content/drive/MyDrive")
+            if not my_drive.is_dir():
+                raise RuntimeError("Mount Google Drive before continuing.")
+            storage = my_drive / "bmr"
+        else:
+            storage = WORKSPACE
+        RUNS = storage / "runs" / EXPERIMENT
+        SAVED_DATA = storage / "data" / "{data_folder}"
+        print("Experiment outputs:", RUNS)
+    """)
+
 
 BOOTSTRAP = """
     def run(*arguments):
@@ -114,7 +116,18 @@ def write_notebook(name, cells, metadata):
     path.write_text(json.dumps(content, indent=2) + "\n")
 
 
-def notebook(name, title, cells, *, proxy_controls=None, training=False, benchmark=False, gpu=True):
+def notebook(
+    name,
+    title,
+    cells,
+    *,
+    proxy_controls=None,
+    training=False,
+    benchmark=False,
+    gpu=True,
+    experiment="standard_vs_gated_160m_tinyllama",
+    data_folder="fineweb_edu_tinyllama",
+):
     setup = (ROOT / "scripts" / "colab_setup.py").read_text()
     bootstrap = (
         "# Set up experiment runtime\n"
@@ -140,7 +153,7 @@ def notebook(name, title, cells, *, proxy_controls=None, training=False, benchma
                 f"# {title}\n\n{runtime} in Colab, run the cells in order, "
                 "and approve the Google Drive mount when prompted."
             ),
-            STORAGE,
+            storage_cell(experiment, data_folder),
             *([proxy_controls] if proxy_controls is not None else []),
             code(bootstrap),
             *cells,
@@ -360,7 +373,8 @@ notebook(
     "Time one standard 158M training run",
     [
         markdown(
-            "Run this once the TinyLlama-tokenized FineWeb-Edu corpus from notebook 01 is ready. "
+            "Uses your existing `My Drive/bmr/data/fineweb_edu` upload. Colab reads its Qwen tokens "
+            "and converts documents to TinyLlama tokens in small groups as training needs them. "
             "It draws one of the 32 hyperparameter combinations and trains on 3,156,295,680 targets "
             "(20 per parameter). You can run it before the proxy searches. The tqdm bar estimates "
             "the remaining time from completed optimizer updates. Give it several updates to settle. "
@@ -379,9 +393,9 @@ notebook(
             trial = random.Random(DRAW_SEED).choice(trials)
             model = ModelConfig.load(REPO / "configs/models/standard_main.yaml")
             hp = Hyperparameters(**trial["hyperparameters"])
-            output = RUNS / "timing" / "standard" / trial["id"]
+            output = RUNS / trial["id"]
             record = output / "run.json"
-            profile = RUNS / "standard_main_profile.json"
+            profile = RUNS.parent / "standard_vs_gated_160m_tinyllama" / "standard_main_profile.json"
             if record.is_file():
                 settings = TrainConfig.from_record(json.loads(record.read_text())["training"])
             else:
@@ -402,12 +416,14 @@ notebook(
         ),
         code("""
             from contextlib import chdir, ExitStack
+            from functools import partial
+            from base_model_research.timing_data import timing_corpora
             from base_model_research.training import train
             from tqdm.auto import tqdm
 
             def train_one_model():
                 if not (SAVED_DATA / "manifest.json").is_file():
-                    raise FileNotFoundError(f"Prepare and upload the notebook 01 corpus to {SAVED_DATA}.")
+                    raise FileNotFoundError(f"Expected the original FineWeb-Edu upload at {SAVED_DATA / 'manifest.json'}.")
                 cache = DATA.parent / "cached_shards" if DATA != SAVED_DATA else None
                 with chdir(REPO), ExitStack() as display:
                     bar = None
@@ -421,13 +437,16 @@ notebook(
 
                     return train(model, hp, settings, SAVED_DATA, output, resume=record.is_file(),
                                  selection={"method": "random", "trial_id": trial["id"]},
-                                 progress=show_update, cache_dir=cache)
+                                 progress=show_update, cache_dir=cache,
+                                 adapt_corpora=partial(timing_corpora, run_dir=output))
 
-            print("Initializing the standard model. The ETA appears after the first optimizer update.", flush=True)
+            print(f"Reading {SAVED_DATA}. The ETA includes on-demand data conversion.", flush=True)
             result = train_one_model()
             print(f"Run {result['status']} at update {result['step']:,}.")
         """),
     ],
+    experiment="standard_158m_timing_fineweb_edu",
+    data_folder="fineweb_edu",
 )
 
 notebook(

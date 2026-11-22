@@ -173,6 +173,8 @@ def train(
     selection=None,
     progress=None,
     cache_dir=None,
+    *,
+    adapt_corpora=None,
 ):
     """Train once over the assigned token budget, checkpointing main runs at every validation."""
     config.require_schedule()
@@ -198,6 +200,7 @@ def train(
             selection,
             progress,
             cache_dir,
+            adapt_corpora,
         )
 
 
@@ -214,11 +217,10 @@ def _train_locked(
     selection,
     progress,
     cache_dir,
+    adapt_corpora,
 ):
     corpus = TokenCorpus(data_dir, "train", cache_dir=cache_dir)
     validation = TokenCorpus(data_dir, "validation", cache_dir=cache_dir)
-    if corpus.manifest.get("tokenizer_max_id", 0) >= model_config.vocab_size:
-        raise ValueError("Prepared tokenizer has token IDs outside the model vocabulary")
     checkpoint_dir = run_dir / "checkpoints"
     is_main = model_config.width_mult != 1
     seed_everything(config.seed)
@@ -227,6 +229,10 @@ def _train_locked(
     model.train()
     parameters = parameter_count(model)
     budget = parameters * config.tokens_per_parameter
+    if adapt_corpora is not None:
+        corpus, validation = adapt_corpora(corpus, validation, budget + 1)
+    if corpus.manifest.get("tokenizer_max_id", 0) >= model_config.vocab_size:
+        raise ValueError("Prepared tokenizer has token IDs outside the model vocabulary")
     if corpus.total_tokens < budget + 1:
         raise ValueError(
             f"Need {budget + 1:,} training tokens including lookahead; have {corpus.total_tokens:,}"

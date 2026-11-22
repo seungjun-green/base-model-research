@@ -77,7 +77,26 @@ def write_manifest(root, splits, **metadata):
     return manifest
 
 
-class TokenCorpus:
+class TokenStream:
+    def batch(self, start, target_count, context_length):
+        """Every input position has one shifted target, including the block boundary.
+
+        The final partial block is padded and masked; only target_count positions
+        contribute to the objective or the training budget.
+        """
+        if target_count <= 0:
+            raise ValueError("target_count must be positive")
+        tokens = self.read(start, target_count + 1)
+        padding = -target_count % context_length
+        if padding:
+            tokens = np.pad(tokens, (0, padding))
+        x = torch.from_numpy(tokens[:-1].reshape(-1, context_length))
+        y = tokens[1:].copy()
+        y[target_count:] = -100
+        return x, torch.from_numpy(y.reshape(-1, context_length))
+
+
+class TokenCorpus(TokenStream):
     def __init__(self, root, split, verify=False, *, cache_dir=None):
         self.root = Path(root)
         self.manifest = json.loads((self.root / "manifest.json").read_text())
@@ -148,23 +167,6 @@ class TokenCorpus:
             start += take
             written += take
         return tokens
-
-    def batch(self, start, target_count, context_length):
-        """Every input position has one shifted target, including the block boundary.
-
-        The final partial block is padded and masked; only target_count positions
-        contribute to the objective or the training budget.
-        """
-        if target_count <= 0:
-            raise ValueError("target_count must be positive")
-        tokens = self.read(start, target_count + 1)
-        padding = -target_count % context_length
-        if padding:
-            tokens = np.pad(tokens, (0, padding))
-        x = torch.from_numpy(tokens[:-1].reshape(-1, context_length))
-        y = tokens[1:].copy()
-        y[target_count:] = -100
-        return x, torch.from_numpy(y.reshape(-1, context_length))
 
 
 def load_corpus_tokenizer(path, *, tokenizer_name=None, **kwargs):

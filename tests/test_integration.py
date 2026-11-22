@@ -269,13 +269,50 @@ def test_notebook_cells_are_valid_python_and_have_no_saved_outputs():
 
 
 def test_timing_notebook_trains_one_random_main_without_a_sweep(
-    tmp_path, corpus, tiny_config, training_config, monkeypatch, capsys
+    tmp_path, tiny_config, training_config, monkeypatch, capsys
 ):
-    from base_model_research import training
-    from base_model_research.config import ModelConfig
+    from tokenizers import Tokenizer, models, pre_tokenizers
+    from transformers import PreTrainedTokenizerFast
+
+    from base_model_research import timing_data, training
+    from base_model_research.config import DEFAULT_TOKENIZER, ModelConfig
+    from base_model_research.data import TokenWriter, write_manifest
+
+    def tokenizer(words):
+        backend = Tokenizer(models.WordLevel({word: i for i, word in enumerate(words)}, unk_token="<unk>"))
+        backend.pre_tokenizer = pre_tokenizers.Whitespace()
+        return PreTrainedTokenizerFast(tokenizer_object=backend, unk_token="<unk>", eos_token="<eos>")
+
+    source = tokenizer(["<unk>", *map(str, range(10)), "one", "two", "<eos>"])
+    target = tokenizer(["<unk>", "<eos>", "one", "two", "1", "2", "3", "4"])
+    corpus = tmp_path / "data" / "fineweb_edu"
+    source.save_pretrained(corpus / "tokenizer")
+    splits = {}
+    for split, repeats in (("train", 1500), ("validation", 10)):
+        writer = TokenWriter(corpus, split, shard_tokens=31)
+        writer.write([11, 12, source.eos_token_id] * repeats)
+        splits[split] = writer.finish()
+    write_manifest(corpus, splits, tokenizer=timing_data.QWEN_TOKENIZER, tokenizer_max_id=source.eos_token_id)
+    load = timing_data.load_corpus_tokenizer
+    monkeypatch.setattr(
+        timing_data,
+        "load_corpus_tokenizer",
+        lambda name, **kw: target if name == DEFAULT_TOKENIZER else load(name, **kw),
+    )
+    monkeypatch.setattr(timing_data, "TINYLLAMA_VOCAB_SIZE", len(target))
+
+    streams = (TokenCorpus(corpus, "train"), TokenCorpus(corpus, "validation"))
+    converted, valid = timing_data.timing_corpora(*streams, 4500, run_dir=tmp_path)
+    converted.block_size = 7
+    assert converted.read(2100, 20).tolist() == ([2, 3, 1] * 7)[:20]
+    assert valid.total_tokens == 30 and valid.read(0, 30).tolist() == [2, 3, 1] * 10
+    resumed, _ = timing_data.timing_corpora(*streams, 4500, run_dir=tmp_path)
+    resumed.block_size = 7
+    assert len(resumed.positions) > 1 and resumed.read(2102, 4).tolist() == [1, 2, 3, 1]
 
     path = Path("notebooks/time_standard_main.ipynb")
     cells = [cell["source"] for cell in json.loads(path.read_text())["cells"] if cell["cell_type"] == "code"]
+    assert 'SAVED_DATA = storage / "data" / "fineweb_edu"' in cells[0]
     env = {"REPO": Path.cwd(), "RUNS": tmp_path / "runs", "SAVED_DATA": corpus, "DATA": corpus, "json": json}
 
     def run_cell(source):
@@ -284,7 +321,7 @@ def test_timing_notebook_trains_one_random_main_without_a_sweep(
     run_cell(cells[-2])
     assert env["model"] == ModelConfig.load("configs/models/standard_main.yaml")
     assert env["settings"].tokens_per_parameter == 20
-    assert env["output"] == env["RUNS"] / "timing" / "standard" / env["trial"]["id"]
+    assert env["output"] == env["RUNS"] / env["trial"]["id"]
 
     # Exercise the notebook's full training cell on the small CPU fixtures.
     env.update(model=tiny_config.at_width(2), settings=training_config)

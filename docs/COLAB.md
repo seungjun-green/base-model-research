@@ -49,9 +49,10 @@ reopens the saved experiment. All notebooks launch the same Python package.
 6. `05_train_modified_main.ipynb`: transfer the modified winning settings.
 7. `06_benchmarks.ipynb`: run the five-model comparison.
 
-After preparing the data, you can open the [optional 158M timing notebook](https://colab.research.google.com/github/seungjun-green/base-model-research/blob/main/notebooks/time_standard_main.ipynb)
+With your original `My Drive/bmr/data/fineweb_edu` upload, open the [optional 158M timing notebook](https://colab.research.google.com/github/seungjun-green/base-model-research/blob/main/notebooks/time_standard_main.ipynb)
 on the RTX PRO 6000. It trains one standard main model with a seeded random draw from the shared trials.
-The progress bar shows time remaining for the full run. Its checkpoints and metrics go under `timing/standard/` in the experiment folder.
+Colab decodes the original Qwen tokens and re-encodes documents with TinyLlama on demand.
+The ETA includes this conversion. Checkpoints and metrics go under `My Drive/bmr/runs/standard_158m_timing_fineweb_edu/`.
 
 In notebooks 02 and 03, the first code cell mounts Google Drive. In the next cell,
 set `MICROBATCH_SIZE`, `RUN_SMOKE`, and `RUN_FULL`. The microbatch defaults to 4 sequences

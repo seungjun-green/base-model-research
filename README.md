@@ -51,8 +51,9 @@ To prepare the data on your Mac, open [local notebook 01](notebooks/local/01_pre
 and select **Run All**. Drag the completed `~/Downloads/fineweb_edu_tinyllama` folder into
 **My Drive → bmr → data** and continue with notebook 02 once the upload finishes.
 
-To time one standard 158M run after preparing the data, open the
+To time one standard 158M run using your original `My Drive/bmr/data/fineweb_edu` upload, open the
 [optional timing notebook in Colab](https://colab.research.google.com/github/seungjun-green/base-model-research/blob/main/notebooks/time_standard_main.ipynb).
+It converts the Qwen tokens to TinyLlama tokens in Colab as training reads each group of documents.
 It trains with one randomly selected hyperparameter set and shows a live ETA for its full token budget.
 
 All Colab notebooks use the selected runtime's Python and PyTorch. Setup
