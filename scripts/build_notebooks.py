@@ -466,6 +466,89 @@ notebook(
     experiment="proxy_gate_variants",
 )
 
+notebook(
+    "trial_000_residual_tanh_proxy.ipynb",
+    "Trial 000 · modified proxy with a direct residual and tanh gate",
+    [
+        markdown("""
+            Both attention and the FFN use **x + y + tanh(GELU(W₁x) ⊙ W₂p)**. Here y is the current
+            sublayer output and p is the previous layer's output from the same kind of sublayer.
+            In layer 1, p = x. Each sublayer has its own W₁ and W₂.
+
+            This notebook trains one 13,362,624-parameter proxy on TinyLlama-tokenized FineWeb-Edu
+            with trial 000's hyperparameters and seed 42. A full run uses 267,252,480 training targets
+            and evaluates the held-out data 20 times. The first validation is at update 51.
+        """),
+        code("""
+            from dataclasses import replace
+            from math import ceil
+            from base_model_research.config import DEFAULT_TOKENIZER, Hyperparameters
+            from base_model_research.search import load_trials
+
+            trial = next(t for t in load_trials(REPO / "experiments/trials_seed42.json")["trials"]
+                         if t["id"] == "trial_000")
+            hp = Hyperparameters(**trial["hyperparameters"])
+            model = replace(ModelConfig.load(REPO / "configs/models/modified_proxy.yaml"), family="residual_tanh")
+            settings = TrainConfig.load(REPO / "configs/training.yaml", microbatch_size=MICROBATCH_SIZE)
+            with torch.device("meta"):
+                budget = parameter_count(ResearchLM(model, hp)) * settings.tokens_per_parameter
+            updates = ceil(budget / (settings.context_length * settings.global_batch_size))
+            OUTPUT = RUNS / trial["id"]
+            print(f"{trial['id']} · seed {settings.seed} · {budget:,} tokens · {updates:,} optimizer updates")
+            print(json.dumps(trial["hyperparameters"], indent=2))
+            print(f"Results folder: {OUTPUT}")
+        """),
+        code("""
+            # Copy the proxy's training prefix and validation shards to the runtime SSD.
+            manifest = SAVED_DATA / "manifest.json"
+            if not manifest.is_file():
+                raise FileNotFoundError(f"Expected the prepared TinyLlama corpus at {manifest}.")
+            if json.loads(manifest.read_text())["tokenizer"] != DEFAULT_TOKENIZER:
+                raise ValueError(f"Expected TinyLlama-tokenized FineWeb-Edu at {SAVED_DATA}.")
+            PROXY_DATA = stage_proxy_data(SAVED_DATA, DATA, budget)
+        """),
+        code("""
+            from contextlib import chdir
+            from base_model_research.training import train
+
+            print("Initializing trial 000. Each update records all 112 gate matrices before clipping.", flush=True)
+            with chdir(REPO), tqdm(total=updates, desc="Residual + tanh · trial 000", unit="update", delay=1) as bar:
+                def show_update(label, unit, completed, total, detail=""):
+                    bar.set_postfix_str(detail, refresh=False)
+                    bar.update(completed - bar.n)
+
+                result = train(model, hp, settings, PROXY_DATA, OUTPUT,
+                               resume=(OUTPUT / "run.json").is_file(),
+                               selection={"trial_id": trial["id"]}, progress=show_update)
+            print(f"{result['status']} after {result['step']:,} completed updates.")
+            if result.get("failure_reason"):
+                print(f"Update {result['failed_at_step']}: {result['failure_reason']}")
+        """),
+        markdown("""
+            **Inspect the run.** `gate_gradients.csv` stores one row per update and layer.
+            The four columns give the RMS of the accumulated weight gradients before clipping.
+            W₁ projects the current input and W₂ projects the previous output. The console prints
+            examples from layers 1, 14, and 28 early in training. The heatmaps show every layer and update.
+
+            Validation losses are saved to `metrics.jsonl` and printed as each evaluation finishes.
+            The plot cell also works after an interruption. Rerunning training reuses a completed or
+            diverged result. An interrupted proxy restarts from its seed and records a fresh trace.
+        """),
+        code("""
+            import matplotlib.pyplot as plt
+            from base_model_research.gate_gradients import plot_gate_training
+
+            figure = plot_gate_training(OUTPUT)
+            if figure is not None:
+                plt.show()
+        """),
+    ],
+    proxy_controls=code("""
+        MICROBATCH_SIZE = 16  # Sequences per GPU microbatch. Choose a divisor of 128.
+    """),
+    experiment="proxy_residual_tanh",
+)
+
 for family, number, proxy_number in (("standard", "04", "02"), ("modified", "05", "03")):
     notebook(
         f"{number}_train_{family}_main.ipynb",

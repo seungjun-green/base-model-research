@@ -5,8 +5,9 @@ import platform
 import random
 import subprocess
 import time
-from contextlib import nullcontext
+from contextlib import ExitStack, nullcontext
 from dataclasses import asdict
+from functools import partial
 from pathlib import Path
 
 import numpy as np
@@ -14,6 +15,7 @@ import torch
 
 from .config import dump_json, json_fingerprint
 from .data import TokenCorpus
+from .gate_gradients import GateGradientLog
 from .models import parameter_count
 from .parameterization import build_model, make_optimizer, parameter_report
 from .storage import (
@@ -137,7 +139,7 @@ def validate(model, corpus, config, device):
     return total / count
 
 
-def _optimizer_update(model, optimizer, corpus, config, device, start, target_count):
+def _optimizer_update(model, optimizer, corpus, config, device, start, target_count, *, gate_log=None):
     """Accumulate the mean gradient over the actual number of targets in this update."""
     optimizer.zero_grad(set_to_none=True)
     capacity = config.microbatch_size * config.context_length
@@ -153,6 +155,8 @@ def _optimizer_update(model, optimizer, corpus, config, device, start, target_co
         (loss / target_count).backward()
         summed_loss += value
 
+    if gate_log is not None:
+        gate_log.write(start // (config.context_length * config.global_batch_size) + 1)
     norm = torch.nn.utils.clip_grad_norm_(model.parameters(), config.grad_clip).item()
     if not math.isfinite(norm):
         raise FloatingPointError("Nonfinite gradient norm")
@@ -186,7 +190,7 @@ def train(
     if device.type == "cuda" and config.precision == "bf16" and not torch.cuda.is_bf16_supported():
         raise RuntimeError("The selected CUDA runtime does not support BF16")
     run_dir = Path(run_dir)
-    with run_lock(run_dir):
+    with run_lock(run_dir), ExitStack() as run_files:
         return _train_locked(
             model_config,
             hp,
@@ -201,6 +205,7 @@ def train(
             progress,
             cache_dir,
             adapt_corpora,
+            run_files,
         )
 
 
@@ -218,6 +223,7 @@ def _train_locked(
     progress,
     cache_dir,
     adapt_corpora,
+    run_files,
 ):
     corpus = TokenCorpus(data_dir, "train", cache_dir=cache_dir)
     validation = TokenCorpus(data_dir, "validation", cache_dir=cache_dir)
@@ -332,6 +338,12 @@ def _train_locked(
     if not (run_dir / "parameter_groups.json").exists():
         dump_json(run_dir / "parameter_groups.json", parameter_report(model, optimizer))
 
+    update = _optimizer_update
+    if model_config.family == "residual_tanh" and not is_main:
+        # A restarted proxy begins at step zero. Completed runs return above.
+        stream = run_files.enter_context((run_dir / "gate_gradients.csv").open("w", newline=""))
+        update = partial(update, gate_log=GateGradientLog(stream, model))
+
     stop_step = (
         total_steps if stop_after_updates is None else min(total_steps, step + max(0, stop_after_updates))
     )
@@ -346,7 +358,7 @@ def _train_locked(
             started = time.perf_counter()
             schedule.apply(step)
             update_targets = min(tokens_per_update, budget - consumed)
-            update_loss, gradient_norm = _optimizer_update(
+            update_loss, gradient_norm = update(
                 model, optimizer, corpus, config, device, consumed, update_targets
             )
             consumed += update_targets

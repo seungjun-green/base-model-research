@@ -60,6 +60,10 @@ To test the three alternative gates on the settings that caused the original gat
 open the [gate comparison notebook in Colab](https://colab.research.google.com/github/seungjun-green/base-model-research/blob/main/notebooks/compare_gate_variants.ipynb).
 It runs trial 000 once per architecture and saves the failure step or final validation loss to Drive.
 
+To run trial 000 on the modified proxy with a direct residual and a bounded gate, open the
+[residual + tanh proxy notebook in Colab](https://colab.research.google.com/github/seungjun-green/base-model-research/blob/main/notebooks/trial_000_residual_tanh_proxy.ipynb).
+It saves pre-clipping gradient RMS for all 112 gate matrices at every optimizer update and plots the 20 held-out validation losses.
+
 All Colab notebooks use the selected runtime's Python and PyTorch. Setup
 installs the project and its dependencies into that runtime. Notebook 06 also
 installs the evaluation harness. The Git commit is saved once per experiment.

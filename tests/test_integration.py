@@ -252,7 +252,7 @@ def test_actual_harness_evaluates_offline_task(monkeypatch, tiny_config, hp):
 
 def test_notebook_cells_are_valid_python_and_have_no_saved_outputs():
     notebooks = list(Path("notebooks").glob("*.ipynb"))
-    assert len(notebooks) == 9
+    assert len(notebooks) == 10
     for path in [*notebooks, Path("notebooks/local/01_prepare_data.ipynb")]:
         notebook = json.loads(path.read_text())
         if path.parent.name == "local":

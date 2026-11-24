@@ -94,17 +94,24 @@ class ConnectionGate(nn.Module):
         return F.gelu(self.current(current_input), approximate="none") * self.previous(previous_output)
 
 
+class ResidualTanhGate(ConnectionGate):
+    def forward(self, current_input, previous_output):
+        product = super().forward(current_input, previous_output)
+        return current_input + product.tanh()
+
+
 class DecoderLayer(nn.Module):
     def __init__(self, config, hp):
         super().__init__()
-        self.modified = config.family == "modified"
+        self.modified = config.family in ("modified", "residual_tanh")
         self.input_norm = RMSNorm(config.d_model, config.rms_norm_eps)
         self.post_attention_norm = RMSNorm(config.d_model, config.rms_norm_eps)
         self.attention = Attention(config, hp.attention_multiplier)
         self.ffn = FFN(config)
         if self.modified:
-            self.attention_gate = ConnectionGate(config.d_model)
-            self.ffn_gate = ConnectionGate(config.d_model)
+            gate = ResidualTanhGate if config.family == "residual_tanh" else ConnectionGate
+            self.attention_gate = gate(config.d_model)
+            self.ffn_gate = gate(config.d_model)
 
     def forward(self, x, previous_attention=None, previous_ffn=None):
         attention = self.attention(self.input_norm(x))
