@@ -4,7 +4,7 @@ import pytest
 import torch
 from torch.nn import functional as F
 
-from base_model_research.config import DEFAULT_TRAINING_TARGETS, ModelConfig
+from base_model_research.config import DEFAULT_TRAINING_TARGETS, GATE_VARIANTS, ModelConfig
 from base_model_research.diagnostics import check_parameter_counts
 from base_model_research.models import parameter_count
 from base_model_research.parameterization import build_model, make_optimizer
@@ -65,6 +65,41 @@ def test_previous_block_branch_is_differentiable(tiny_config, hp):
     result.square().sum().backward()
     assert previous_a.grad.abs().sum() > 0
     assert previous_f.grad.abs().sum() > 0
+
+
+@pytest.mark.parametrize("family", GATE_VARIANTS)
+def test_gate_variant_equations_for_attention_and_ffn(tiny_config, hp, family):
+    model = build_model(replace(tiny_config, family=family, n_layers=2), hp)
+    first, second = model.layers
+    x = torch.randn(2, 3, tiny_config.d_model)
+    h, a, f = first(x)
+    torch.testing.assert_close(h, x + a + f)
+    a.retain_grad()
+    f.retain_grad()
+
+    def expected(gate, x, y, previous):
+        if family == "multiply_previous":
+            return F.gelu(F.relu(x + y)) * F.linear(previous, gate.previous_proj.weight)
+        skip = previous
+        if family == "scale_previous":
+            assert gate.scale.item() == 1.0
+            with torch.no_grad():
+                gate.scale.fill_(0.5)
+            skip = 0.5 * previous
+        return F.gelu(F.linear(x, gate.input_proj.weight)) * F.linear(y, gate.output_proj.weight) + skip
+
+    current_a = second.attention(second.input_norm(h))
+    after_attention = expected(second.attention_gate, h, current_a, a)
+    current_f = second.ffn(second.post_attention_norm(after_attention))
+    after_ffn = expected(second.ffn_gate, after_attention, current_f, f)
+    actual, actual_a, actual_f = second(h, a, f)
+    torch.testing.assert_close(actual_a, current_a)
+    torch.testing.assert_close(actual_f, current_f)
+    torch.testing.assert_close(actual, after_ffn)
+    actual.sum().backward()
+    assert a.grad is not None and f.grad is not None
+    if family == "scale_previous":
+        assert second.attention_gate.scale.grad is not None and second.ffn_gate.scale.grad is not None
 
 
 @pytest.mark.parametrize("family", ["standard", "modified"])

@@ -252,7 +252,7 @@ def test_actual_harness_evaluates_offline_task(monkeypatch, tiny_config, hp):
 
 def test_notebook_cells_are_valid_python_and_have_no_saved_outputs():
     notebooks = list(Path("notebooks").glob("*.ipynb"))
-    assert len(notebooks) == 8
+    assert len(notebooks) == 9
     for path in [*notebooks, Path("notebooks/local/01_prepare_data.ipynb")]:
         notebook = json.loads(path.read_text())
         if path.parent.name == "local":
@@ -336,6 +336,84 @@ def test_timing_notebook_trains_one_random_main_without_a_sweep(
     assert f"{run['total_steps']}/{run['total_steps']}" in capsys.readouterr().err
     run_cell(cells[-1])
     assert env["result"]["step"] == run["total_steps"]
+
+
+def test_gate_comparison_notebook_records_and_reuses_each_outcome(
+    tmp_path, corpus, tiny_config, training_config, monkeypatch
+):
+    import csv
+    from dataclasses import asdict
+    from functools import partial
+
+    from base_model_research import training
+    from base_model_research.config import DEFAULT_TOKENIZER, GATE_VARIANTS
+    from base_model_research.data import write_manifest
+
+    notebook = Path("notebooks/compare_gate_variants.ipynb")
+    cells = [c["source"] for c in json.loads(notebook.read_text())["cells"] if c["cell_type"] == "code"]
+    assert 'drive.mount("/content/drive")' in cells[0]
+    config_dir = tmp_path / "configs/models"
+    config_dir.mkdir(parents=True)
+    (config_dir / "modified_proxy.yaml").write_text(yaml.safe_dump(asdict(replace(tiny_config, n_layers=2))))
+    (config_dir.parent / "training.yaml").write_text(yaml.safe_dump(asdict(training_config)))
+    (tmp_path / "experiments").symlink_to(Path("experiments").resolve())
+    splits = TokenCorpus(corpus, "train").manifest["splits"]
+    write_manifest(corpus, splits, tokenizer_max_id=7, tokenizer=DEFAULT_TOKENIZER)
+    env = {
+        "REPO": tmp_path,
+        "DATA": tmp_path / "ssd" / "tokens",
+        "SAVED_DATA": corpus,
+        "RUNS": tmp_path / "runs",
+        "sys": sys,
+        "json": json,
+    }
+
+    def execute(source):
+        exec(compile(source, str(notebook), "exec"), env)  # noqa: S102 - exercise the generated cells
+
+    execute(cells[1])
+    assert env["MICROBATCH_SIZE"] == 16
+    env["MICROBATCH_SIZE"] = 2
+    execute(cells[2][cells[2].index("sys.path.insert(") :])
+    execute(cells[3])
+    execute(cells[4])
+    assert env["PROXY_DATA"].is_relative_to(tmp_path / "ssd")
+    monkeypatch.setattr(training, "train", partial(training.train, device="cpu"))
+    update, validate = training._optimizer_update, training.validate
+
+    def update_with_bad_gradient(model, *args):
+        if model.config.family == "add_previous":
+            model.embedding.weight.register_hook(lambda gradient: gradient * float("nan"))
+        return update(model, *args)
+
+    def validate_with_bad_loss(model, *args):
+        return float("nan") if model.config.family == "multiply_previous" else validate(model, *args)
+
+    monkeypatch.setattr(training, "_optimizer_update", update_with_bad_gradient)
+    monkeypatch.setattr(training, "validate", validate_with_bad_loss)
+    execute(cells[5])
+    execute(cells[6])
+    comparison = env["RUNS"] / "comparison.csv"
+    with comparison.open() as stream:
+        rows = list(csv.DictReader(stream))
+    assert [r["variant"] for r in rows] == list(GATE_VARIANTS)
+    assert [r["status"] for r in rows] == ["diverged", "complete", "diverged"]
+    assert (rows[0]["completed_updates"], rows[0]["failed_at_update"]) == ("0", "1")
+    assert rows[0]["failure_reason"] == "Nonfinite gradient norm"
+    assert (rows[2]["completed_updates"], rows[2]["failed_at_update"]) == ("1", "1")
+    assert rows[2]["failure_reason"] == "Nonfinite validation loss"
+    assert float(rows[1]["final_validation_loss"]) > 0
+    for row in rows:
+        record = json.loads((env["RUNS"] / row["variant"] / "trial_000" / "run.json").read_text())
+        assert record["hyperparameters"] == env["trial"]["hyperparameters"]
+        assert record["training"]["seed"] == training_config.seed
+        assert record["parameters"] == int(row["parameters"])
+
+    original = comparison.read_bytes()
+    monkeypatch.setattr(training, "_optimizer_update", lambda *args: pytest.fail("Repeated training"))
+    execute(cells[5])
+    execute(cells[6])
+    assert comparison.read_bytes() == original
 
 
 @pytest.mark.parametrize(("benchmark", "extras"), [(False, "data"), (True, "data,eval")])

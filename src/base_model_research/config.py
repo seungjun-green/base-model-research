@@ -9,6 +9,7 @@ import yaml
 DEFAULT_TOKENIZER = "TinyLlama/TinyLlama-1.1B-intermediate-step-1431k-3T"
 TINYLLAMA_VOCAB_SIZE = 32_000
 DEFAULT_TRAINING_TARGETS = 3_167_907_840  # 20 targets per parameter in the largest main model.
+GATE_VARIANTS = ("add_previous", "scale_previous", "multiply_previous")
 
 SHARED_TRAINING_FIELDS = (
     "context_length",
@@ -48,8 +49,8 @@ class ModelConfig:
     initializer_std: float = 0.02
 
     def __post_init__(self):
-        if self.family not in ("standard", "modified"):
-            raise ValueError("family must be standard or modified")
+        if self.family not in ("standard", "modified", *GATE_VARIANTS):
+            raise ValueError(f"Unknown model family: {self.family!r}")
         for name in (
             "d_model",
             "n_layers",

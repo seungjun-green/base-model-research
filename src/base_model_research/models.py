@@ -10,7 +10,7 @@ from torch import nn
 from torch.nn import functional as F
 from torch.utils.checkpoint import checkpoint
 
-from .config import Hyperparameters, ModelConfig
+from .config import GATE_VARIANTS, Hyperparameters, ModelConfig
 
 
 class RMSNorm(nn.Module):
@@ -121,6 +121,45 @@ class DecoderLayer(nn.Module):
         return result, attention, ffn
 
 
+class CurrentProductWithSkip(nn.Module):
+    def __init__(self, width, *, learned_scale):
+        super().__init__()
+        self.input_proj = nn.Linear(width, width, bias=False)
+        self.output_proj = nn.Linear(width, width, bias=False)
+        self.scale = nn.Parameter(torch.ones(1)) if learned_scale else None
+
+    def forward(self, x, current, previous):
+        skip = previous if self.scale is None else self.scale.to(previous.dtype) * previous
+        return F.gelu(self.input_proj(x)) * self.output_proj(current) + skip
+
+
+class ResidualTimesPrevious(nn.Module):
+    def __init__(self, width):
+        super().__init__()
+        self.previous_proj = nn.Linear(width, width, bias=False)
+
+    def forward(self, x, current, previous):
+        return F.gelu(F.relu(x + current)) * self.previous_proj(previous)
+
+
+class GateVariantLayer(DecoderLayer):
+    def __init__(self, config, hp):
+        super().__init__(config, hp)
+        if config.family == "multiply_previous":
+            self.attention_gate = ResidualTimesPrevious(config.d_model)
+            self.ffn_gate = ResidualTimesPrevious(config.d_model)
+        else:
+            learned_scale = config.family == "scale_previous"
+            self.attention_gate = CurrentProductWithSkip(config.d_model, learned_scale=learned_scale)
+            self.ffn_gate = CurrentProductWithSkip(config.d_model, learned_scale=learned_scale)
+
+    def forward(self, x, previous_attention, previous_ffn):
+        attention = self.attention(self.input_norm(x))
+        h = self.attention_gate(x, attention, previous_attention)
+        ffn = self.ffn(self.post_attention_norm(h))
+        return self.ffn_gate(h, ffn, previous_ffn), attention, ffn
+
+
 class ResearchLM(nn.Module):
     def __init__(self, config: ModelConfig, hp: Hyperparameters):
         super().__init__()
@@ -128,7 +167,14 @@ class ResearchLM(nn.Module):
         self.hp = hp
         self.activation_checkpointing = False
         self.embedding = nn.Embedding(config.vocab_size, config.d_model)
-        self.layers = nn.ModuleList([DecoderLayer(config, hp) for _ in range(config.n_layers)])
+        # The three comparison variants use a standard residual in the first layer,
+        # where no previous attention or FFN output exists.
+        self.layers = nn.ModuleList(
+            GateVariantLayer(config, hp)
+            if index > 0 and config.family in GATE_VARIANTS
+            else DecoderLayer(config, hp)
+            for index in range(config.n_layers)
+        )
         self.final_norm = RMSNorm(config.d_model, config.rms_norm_eps)
         self.readout = MuSharedReadout(self.embedding.weight, bias=False, output_mult=hp.output_multiplier)
 

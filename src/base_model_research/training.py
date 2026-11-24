@@ -338,6 +338,7 @@ def _train_locked(
     label = f"{model_config.family} · {run_dir.name}"
     if progress:
         progress(label, "update", step, stop_step)
+    failure = {}
     try:
         while step < stop_step:
             if device.type == "cuda":
@@ -362,7 +363,10 @@ def _train_locked(
                 "tokens_per_second": update_targets / elapsed,
             }
             if progress:
-                detail = f"step {step} · loss {update_loss:.4f} · {metrics['tokens_per_second']:,.0f} tok/s"
+                detail = (
+                    f"step {step} · loss {update_loss:.4f} · grad norm {gradient_norm:.2e} · "
+                    f"{metrics['tokens_per_second']:,.0f} tok/s"
+                )
                 progress(label, "update", step, stop_step, detail)
             if device.type == "cuda":
                 metrics["peak_vram_bytes"] = torch.cuda.max_memory_allocated(device)
@@ -370,6 +374,7 @@ def _train_locked(
                 final_validation = validate(model, validation, config, device)
                 if not math.isfinite(final_validation):
                     status = "diverged"
+                    failure = {"failed_at_step": step, "failure_reason": "Nonfinite validation loss"}
                     break
                 metrics["validation_loss"] = final_validation
             if step % config.log_interval == 0 or consumed == budget or "validation_loss" in metrics:
@@ -401,9 +406,11 @@ def _train_locked(
             status = "complete" if consumed == budget else "paused"
     except FloatingPointError as error:
         status = "diverged"
-        print(f"Run diverged at update {step + 1}: {error}", flush=True)
+        failure = {"failed_at_step": step + 1, "failure_reason": str(error)}
     except KeyboardInterrupt:
         status = "interrupted"
+    if failure:
+        print(f"Run diverged at update {failure['failed_at_step']}: {failure['failure_reason']}", flush=True)
     latest = json.loads(latest_path.read_text()) if is_main and latest_path.is_file() else None
     result = {
         "status": status,
@@ -413,6 +420,7 @@ def _train_locked(
         "validation_loss": final_validation if status == "complete" else None,
         "fingerprint": fingerprint,
         "checkpoint": str(checkpoint_dir / latest["file"]) if latest else None,
+        **failure,
     }
     dump_json(result_path, result)
     if remote:

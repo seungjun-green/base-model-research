@@ -343,6 +343,129 @@ for family, number in (("standard", "02"), ("modified", "03")):
         """),
     )
 
+notebook(
+    "compare_gate_variants.ipynb",
+    "Compare three gated proxies on trial 000",
+    [
+        markdown("""
+            Each proxy uses **trial 000**, the settings under which the original gated proxy diverged.
+            All three use seed 42, the same ordered TinyLlama-tokenized FineWeb-Edu data, and the same
+            held-out validation set. They run sequentially for 20 training tokens per parameter with
+            20 validations per full run. The parameter counts and total updates can differ.
+
+            In the table, `x` is the input to the sublayer, `y` its output, and `p` the previous
+            layer's output from the **same kind of sublayer**. Multiplication `⊙` is elementwise.
+
+            | Variant | Output passed to the next sublayer |
+            |---|---|
+            | 1 · add_previous | GELU(W₁x) ⊙ (W₂y) + p |
+            | 2 · scale_previous | GELU(W₁x) ⊙ (W₂y) + αp |
+            | 3 · multiply_previous | GELU(ReLU(x + y)) ⊙ (Wp) |
+
+            The first layer uses ordinary residual addition because it has no previous layer.
+            Every later layer applies its formula to both attention and the FFN, with independent
+            weights. Each α in variant 2 is a learned scalar initialized to 1.
+        """),
+        code("""
+            from dataclasses import replace
+            from base_model_research.config import DEFAULT_TOKENIZER, GATE_VARIANTS, Hyperparameters
+            from base_model_research.search import load_trials
+
+            trial = next(t for t in load_trials(REPO / "experiments/trials_seed42.json")["trials"]
+                         if t["id"] == "trial_000")
+            hp = Hyperparameters(**trial["hyperparameters"])
+            settings = TrainConfig.load(REPO / "configs/training.yaml", microbatch_size=MICROBATCH_SIZE)
+            proxy = ModelConfig.load(REPO / "configs/models/modified_proxy.yaml")
+            models = [replace(proxy, family=name) for name in GATE_VARIANTS]
+            with torch.device("meta"):
+                counts = {m.family: parameter_count(ResearchLM(m, hp)) for m in models}
+            print(f"Shared settings: {trial['id']}, seed {settings.seed}, microbatch {settings.microbatch_size}")
+            print(json.dumps(trial["hyperparameters"], indent=2))
+            for name, count in counts.items():
+                print(f"{name}: {count:,} parameters, {count * settings.tokens_per_parameter:,} training tokens")
+        """),
+        code("""
+            # Copy the shards needed by the largest variant to the Colab SSD.
+            manifest = SAVED_DATA / "manifest.json"
+            if not manifest.is_file():
+                raise FileNotFoundError(f"Expected your prepared TinyLlama corpus at {manifest}.")
+            if json.loads(manifest.read_text())["tokenizer"] != DEFAULT_TOKENIZER:
+                raise ValueError(f"Expected the TinyLlama-tokenized FineWeb-Edu corpus at {SAVED_DATA}.")
+            PROXY_DATA = stage_proxy_data(SAVED_DATA, DATA, max(counts.values()) * settings.tokens_per_parameter)
+        """),
+        code("""
+            from contextlib import chdir
+            from math import ceil
+            from base_model_research.training import train
+
+            def train_variant(model):
+                output = RUNS / model.family / trial["id"]
+                total = ceil(counts[model.family] * settings.tokens_per_parameter /
+                             (settings.global_batch_size * settings.context_length))
+                print(f"Checking saved results and initializing {model.family}…", flush=True)
+                with chdir(REPO), tqdm(total=total, desc=model.family, unit="update", delay=1) as bar:
+                    def show_update(label, unit, completed, target, detail=""):
+                        bar.set_postfix_str(detail, refresh=False)
+                        bar.update(completed - bar.n)
+
+                    return train(model, hp, settings, PROXY_DATA, output,
+                                 resume=(output / "run.json").is_file(),
+                                 selection={"trial_id": trial["id"]}, progress=show_update)
+
+            for model in models:
+                result = train_variant(model)
+                print(f"{model.family}: {result['status']} after {result['step']:,} completed updates.")
+                if result["status"] == "diverged":
+                    print(f"Update {result['failed_at_step']}: {result['failure_reason']}.")
+                if result["status"] == "interrupted":
+                    break
+        """),
+        markdown("""
+            **Read the results.** A nonfinite training loss, gradient norm, or validation loss marks
+            that variant as diverged. The next variant then starts. Compare final validation losses
+            among completed runs. A loss near 10.37 is what uniform predictions give with this
+            32,000-token vocabulary, so a finite loss alone can hide a model that learned very little.
+            Watch the gradient norm in the progress bar. If it stays at zero while loss stays near
+            10.37, the model may be stuck predicting every token with equal probability.
+
+            Rerunning the training cell reuses completed and diverged results. An interrupted variant
+            restarts from its seed. You can run the summary cell separately to inspect saved results.
+        """),
+        code("""
+            import pandas as pd
+
+            rows = []
+            for model in models:
+                folder = RUNS / model.family / trial["id"]
+                path = folder / "result.json"
+                result = json.loads(path.read_text()) if path.is_file() else {}
+                metrics = folder / "metrics.jsonl"
+                logged = metrics.read_text().splitlines() if result and metrics.is_file() else []
+                last = json.loads(logged[-1]) if logged else {}
+                rows.append({
+                    "variant": model.family, "parameters": counts[model.family],
+                    "status": result.get("status", "no result yet"),
+                    "completed_updates": result.get("step"), "failed_at_update": result.get("failed_at_step"),
+                    "failure_reason": result.get("failure_reason"), "training_tokens": result.get("consumed_tokens"),
+                    "last_logged_gradient_norm": last.get("gradient_norm"),
+                    "final_validation_loss": result.get("validation_loss"),
+                })
+            summary = pd.DataFrame(rows).convert_dtypes()
+            summary_path = RUNS / "comparison.csv"
+            temporary = summary_path.with_suffix(".csv.tmp")
+            with run_lock(RUNS, blocking=True):
+                summary.to_csv(temporary, index=False)
+                temporary.replace(summary_path)
+            print(f"Saved comparison: {summary_path}")
+            summary
+        """),
+    ],
+    proxy_controls=code("""
+        MICROBATCH_SIZE = 16  # Sequences per GPU microbatch. Must divide 128.
+    """),
+    experiment="proxy_gate_variants",
+)
+
 for family, number, proxy_number in (("standard", "04", "02"), ("modified", "05", "03")):
     notebook(
         f"{number}_train_{family}_main.ipynb",

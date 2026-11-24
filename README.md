@@ -56,6 +56,10 @@ To time one standard 158M run using your original `My Drive/bmr/data/fineweb_edu
 It converts the Qwen tokens to TinyLlama tokens in Colab as training reads each group of documents.
 It trains with one randomly selected hyperparameter set and shows a live ETA for its full token budget.
 
+To test the three alternative gates on the settings that caused the original gated proxy to diverge,
+open the [gate comparison notebook in Colab](https://colab.research.google.com/github/seungjun-green/base-model-research/blob/main/notebooks/compare_gate_variants.ipynb).
+It runs trial 000 once per architecture and saves the failure step or final validation loss to Drive.
+
 All Colab notebooks use the selected runtime's Python and PyTorch. Setup
 installs the project and its dependencies into that runtime. Notebook 06 also
 installs the evaluation harness. The Git commit is saved once per experiment.
@@ -177,7 +181,7 @@ shifted causal indexing and supports rolling likelihood and basic greedy generat
 - `data.py`: token preparation, manifests, shards, and exact data cursors.
 - `training.py`, `storage.py`: training, validation, checkpointing, and Drive synchronization.
 - `search.py`, `evaluation.py`, `diagnostics.py`: sweeps, harness adapter, and runtime checks.
-- `notebooks/` contains the seven experiment launchers, the optional timing notebook, and local data preparation in `local/`.
+- `notebooks/` contains the seven experiment launchers, the optional timing and gate comparison notebooks, and local data preparation in `local/`.
   Regenerate them with `python scripts/build_notebooks.py`.
 - `tests/`: parameter counts, equations, causality, gradients, μP, token accounting,
   resumability, likelihood indexing, and trial reproducibility.
