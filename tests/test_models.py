@@ -22,7 +22,7 @@ def test_all_four_exact_parameter_counts():
     assert max(row["training_tokens"] for row in counts.values()) == DEFAULT_TRAINING_TARGETS
 
 
-@pytest.mark.parametrize("family", ["standard", "modified"])
+@pytest.mark.parametrize("family", ["standard", "modified", "previous_attention_relu"])
 def test_causal_and_tied(tiny_config, hp, family):
     model = build_model(replace(tiny_config, family=family, n_layers=2), hp).eval()
     assert model.embedding.weight is model.readout.weight
@@ -31,6 +31,28 @@ def test_causal_and_tied(tiny_config, hp, family):
     changed[:, 3:] = 0
     torch.testing.assert_close(model(x)[:, :3], model(changed)[:, :3], rtol=0, atol=0)
     assert parameter_count(model) == sum(p.numel() for p in model.parameters())
+
+
+def test_previous_attention_relu_matches_explicit_forward_and_backward(tiny_config, hp):
+    cfg = replace(tiny_config, n_layers=3)
+    reference = build_model(cfg, hp)
+    model = build_model(replace(cfg, family="previous_attention_relu"), hp)
+    model.load_state_dict(reference.state_dict(), strict=True)
+    tokens = torch.tensor([[1, 2, 3, 4], [4, 3, 2, 1]])
+    x = reference.embedding(tokens) * hp.embedding_multiplier
+    previous = torch.zeros_like(x)
+    for layer in reference.layers:
+        current = layer.attention(layer.input_norm(x))
+        h = F.relu(x + current + previous)
+        x = h + layer.ffn(layer.post_attention_norm(h))
+        previous = current
+    expected = reference.readout(reference.final_norm(x))
+    actual = model(tokens)
+    torch.testing.assert_close(actual, expected, rtol=0, atol=0)
+    actual.square().sum().backward()
+    expected.square().sum().backward()
+    for p, q in zip(model.parameters(), reference.parameters()):
+        torch.testing.assert_close(p.grad, q.grad)
 
 
 def test_modified_equations_and_first_layer(tiny_config, hp):

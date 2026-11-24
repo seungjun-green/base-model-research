@@ -104,6 +104,7 @@ class DecoderLayer(nn.Module):
     def __init__(self, config, hp):
         super().__init__()
         self.modified = config.family in ("modified", "residual_tanh")
+        self.previous_attention_relu = config.family == "previous_attention_relu"
         self.input_norm = RMSNorm(config.d_model, config.rms_norm_eps)
         self.post_attention_norm = RMSNorm(config.d_model, config.rms_norm_eps)
         self.attention = Attention(config, hp.attention_multiplier)
@@ -119,6 +120,10 @@ class DecoderLayer(nn.Module):
             h = attention + self.attention_gate(x, x if previous_attention is None else previous_attention)
         else:
             h = x + attention
+            if self.previous_attention_relu:
+                if previous_attention is not None:
+                    h = h + previous_attention
+                h = F.relu(h)
         ffn = self.ffn(self.post_attention_norm(h))
         if self.modified:
             result = ffn + self.ffn_gate(h, h if previous_ffn is None else previous_ffn)

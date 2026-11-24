@@ -49,7 +49,13 @@ class ModelConfig:
     initializer_std: float = 0.02
 
     def __post_init__(self):
-        if self.family not in ("standard", "modified", "residual_tanh", *GATE_VARIANTS):
+        if self.family not in (
+            "standard",
+            "modified",
+            "residual_tanh",
+            "previous_attention_relu",
+            *GATE_VARIANTS,
+        ):
             raise ValueError(f"Unknown model family: {self.family!r}")
         for name in (
             "d_model",

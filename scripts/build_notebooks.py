@@ -466,6 +466,57 @@ notebook(
     experiment="proxy_gate_variants",
 )
 
+
+def trial_000_proxy_cells(*, family, backbone, label, startup_message):
+    return [
+        code(f"""
+            from dataclasses import replace
+            from math import ceil
+            from base_model_research.config import DEFAULT_TOKENIZER, Hyperparameters
+            from base_model_research.search import load_trials
+
+            trial = next(t for t in load_trials(REPO / "experiments/trials_seed42.json")["trials"]
+                         if t["id"] == "trial_000")
+            hp = Hyperparameters(**trial["hyperparameters"])
+            model = replace(ModelConfig.load(REPO / "configs/models/{backbone}_proxy.yaml"), family="{family}")
+            settings = TrainConfig.load(REPO / "configs/training.yaml", microbatch_size=MICROBATCH_SIZE)
+            with torch.device("meta"):
+                budget = parameter_count(ResearchLM(model, hp)) * settings.tokens_per_parameter
+            updates = ceil(budget / (settings.context_length * settings.global_batch_size))
+            OUTPUT = RUNS / trial["id"]
+            print(f"{{trial['id']}} · seed {{settings.seed}} · {{budget:,}} tokens · {{updates:,}} optimizer updates")
+            print(json.dumps(trial["hyperparameters"], indent=2))
+            print(f"Results folder: {{OUTPUT}}")
+        """),
+        code("""
+            # Copy the proxy's training prefix and validation shards to the runtime SSD.
+            manifest = SAVED_DATA / "manifest.json"
+            if not manifest.is_file():
+                raise FileNotFoundError(f"Expected the prepared TinyLlama corpus at {manifest}.")
+            if json.loads(manifest.read_text())["tokenizer"] != DEFAULT_TOKENIZER:
+                raise ValueError(f"Expected TinyLlama-tokenized FineWeb-Edu at {SAVED_DATA}.")
+            PROXY_DATA = stage_proxy_data(SAVED_DATA, DATA, budget)
+        """),
+        code(f"""
+            from contextlib import chdir
+            from base_model_research.training import train
+
+            print("{startup_message}", flush=True)
+            with chdir(REPO), tqdm(total=updates, desc="{label} · trial 000", unit="update", delay=1) as bar:
+                def show_update(label, unit, completed, total, detail=""):
+                    bar.set_postfix_str(detail, refresh=False)
+                    bar.update(completed - bar.n)
+
+                result = train(model, hp, settings, PROXY_DATA, OUTPUT,
+                               resume=(OUTPUT / "run.json").is_file(),
+                               selection={{"trial_id": trial["id"]}}, progress=show_update)
+            print(f"{{result['status']}} after {{result['step']:,}} completed updates.")
+            if result.get("failure_reason"):
+                print(f"Update {{result['failed_at_step']}}: {{result['failure_reason']}}")
+        """),
+    ]
+
+
 notebook(
     "trial_000_residual_tanh_proxy.ipynb",
     "Trial 000 · modified proxy with a direct residual and tanh gate",
@@ -479,51 +530,12 @@ notebook(
             with trial 000's hyperparameters and seed 42. A full run uses 267,252,480 training targets
             and evaluates the held-out data 20 times. The first validation is at update 51.
         """),
-        code("""
-            from dataclasses import replace
-            from math import ceil
-            from base_model_research.config import DEFAULT_TOKENIZER, Hyperparameters
-            from base_model_research.search import load_trials
-
-            trial = next(t for t in load_trials(REPO / "experiments/trials_seed42.json")["trials"]
-                         if t["id"] == "trial_000")
-            hp = Hyperparameters(**trial["hyperparameters"])
-            model = replace(ModelConfig.load(REPO / "configs/models/modified_proxy.yaml"), family="residual_tanh")
-            settings = TrainConfig.load(REPO / "configs/training.yaml", microbatch_size=MICROBATCH_SIZE)
-            with torch.device("meta"):
-                budget = parameter_count(ResearchLM(model, hp)) * settings.tokens_per_parameter
-            updates = ceil(budget / (settings.context_length * settings.global_batch_size))
-            OUTPUT = RUNS / trial["id"]
-            print(f"{trial['id']} · seed {settings.seed} · {budget:,} tokens · {updates:,} optimizer updates")
-            print(json.dumps(trial["hyperparameters"], indent=2))
-            print(f"Results folder: {OUTPUT}")
-        """),
-        code("""
-            # Copy the proxy's training prefix and validation shards to the runtime SSD.
-            manifest = SAVED_DATA / "manifest.json"
-            if not manifest.is_file():
-                raise FileNotFoundError(f"Expected the prepared TinyLlama corpus at {manifest}.")
-            if json.loads(manifest.read_text())["tokenizer"] != DEFAULT_TOKENIZER:
-                raise ValueError(f"Expected TinyLlama-tokenized FineWeb-Edu at {SAVED_DATA}.")
-            PROXY_DATA = stage_proxy_data(SAVED_DATA, DATA, budget)
-        """),
-        code("""
-            from contextlib import chdir
-            from base_model_research.training import train
-
-            print("Initializing trial 000. Each update records all 112 gate matrices before clipping.", flush=True)
-            with chdir(REPO), tqdm(total=updates, desc="Residual + tanh · trial 000", unit="update", delay=1) as bar:
-                def show_update(label, unit, completed, total, detail=""):
-                    bar.set_postfix_str(detail, refresh=False)
-                    bar.update(completed - bar.n)
-
-                result = train(model, hp, settings, PROXY_DATA, OUTPUT,
-                               resume=(OUTPUT / "run.json").is_file(),
-                               selection={"trial_id": trial["id"]}, progress=show_update)
-            print(f"{result['status']} after {result['step']:,} completed updates.")
-            if result.get("failure_reason"):
-                print(f"Update {result['failed_at_step']}: {result['failure_reason']}")
-        """),
+        *trial_000_proxy_cells(
+            family="residual_tanh",
+            backbone="modified",
+            label="Residual + tanh",
+            startup_message="Initializing trial 000. Each update records all 112 gate matrices before clipping.",
+        ),
         markdown("""
             **Inspect the run.** `gate_gradients.csv` stores one row per update and layer.
             The four columns give the RMS of the accumulated weight gradients before clipping.
@@ -547,6 +559,39 @@ notebook(
         MICROBATCH_SIZE = 16  # Sequences per GPU microbatch. Choose a divisor of 128.
     """),
     experiment="proxy_residual_tanh",
+)
+
+notebook(
+    "trial_000_previous_attention_relu_proxy.ipynb",
+    "Trial 000 · ReLU proxy with previous-layer attention",
+    [
+        markdown(r"""
+            This notebook trains one proxy with trial 000's hyperparameters and seed 42.
+            Each attention sublayer computes $h_\ell = \operatorname{ReLU}(x_\ell + a_\ell + a_{\ell-1})$.
+            Here $a_{\ell-1}$ is the preceding layer's projected attention output, with $a_0=0$.
+            The FFN uses the standard SwiGLU and residual addition.
+
+            The 28-layer proxy uses the standard backbone with FFN width 432, 16 query heads
+            and 8 KV heads. It has 13,326,336 parameters and trains on 266,526,720 TinyLlama-tokenized
+            FineWeb-Edu targets (20 per parameter), with 20 held-out validations.
+        """),
+        *trial_000_proxy_cells(
+            family="previous_attention_relu",
+            backbone="standard",
+            label="Previous attention + ReLU",
+            startup_message="Initializing the previous-attention ReLU proxy for trial 000.",
+        ),
+        code("""
+            if result["validation_loss"] is not None:
+                print(f"Final validation loss {result['validation_loss']:.4f}")
+            print(f"Run result: {OUTPUT / 'result.json'}")
+            print(f"Training and validation metrics: {OUTPUT / 'metrics.jsonl'}")
+        """),
+    ],
+    proxy_controls=code("""
+        MICROBATCH_SIZE = 16  # Sequences per GPU microbatch. Choose a divisor of 128.
+    """),
+    experiment="proxy_previous_attention_relu",
 )
 
 for family, number, proxy_number in (("standard", "04", "02"), ("modified", "05", "03")):

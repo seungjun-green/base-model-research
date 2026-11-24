@@ -252,7 +252,7 @@ def test_actual_harness_evaluates_offline_task(monkeypatch, tiny_config, hp):
 
 def test_notebook_cells_are_valid_python_and_have_no_saved_outputs():
     notebooks = list(Path("notebooks").glob("*.ipynb"))
-    assert len(notebooks) == 10
+    assert len(notebooks) == 11
     for path in [*notebooks, Path("notebooks/local/01_prepare_data.ipynb")]:
         notebook = json.loads(path.read_text())
         if path.parent.name == "local":
@@ -266,6 +266,68 @@ def test_notebook_cells_are_valid_python_and_have_no_saved_outputs():
             if cell["cell_type"] == "code":
                 assert cell["execution_count"] is None and not cell["outputs"]
                 compile(cell["source"], str(path), "exec")
+
+
+def test_previous_attention_relu_notebook_runs_one_standard_width_proxy(
+    tmp_path, tiny_config, training_config, corpus, monkeypatch
+):
+    from functools import partial
+    from math import ceil
+
+    from base_model_research import training
+    from base_model_research.config import DEFAULT_TOKENIZER, ModelConfig
+    from base_model_research.data import write_manifest
+    from base_model_research.models import parameter_count
+
+    path = Path("notebooks/trial_000_previous_attention_relu_proxy.ipynb")
+    cells = [c["source"] for c in json.loads(path.read_text())["cells"] if c["cell_type"] == "code"]
+    assert "proxy_previous_attention_relu" in cells[0] and 'drive.mount("/content/drive")' in cells[0]
+    env = {
+        "REPO": Path.cwd(),
+        "RUNS": tmp_path / "runs",
+        "SAVED_DATA": corpus,
+        "DATA": tmp_path / "ssd" / "data",
+        "sys": sys,
+        "json": json,
+    }
+
+    def execute(source):
+        exec(compile(source, str(path), "exec"), env)  # noqa: S102 - run the generated notebook cells
+
+    execute(cells[1])
+    execute(cells[2][cells[2].index("sys.path.insert(") :])
+    execute(cells[3])
+    assert env["model"] == replace(
+        ModelConfig.load("configs/models/standard_proxy.yaml"), family="previous_attention_relu"
+    )
+    assert env["settings"].microbatch_size == 16 and env["settings"].tokens_per_parameter == 20
+    assert env["budget"] == 20 * 13_326_336 and env["updates"] == 1017
+    assert env["trial"]["id"] == "trial_000"
+
+    small = replace(tiny_config, family="previous_attention_relu", n_layers=2)
+    budget = parameter_count(build_model(small, env["hp"])) * training_config.tokens_per_parameter
+    env.update(
+        model=small,
+        settings=training_config,
+        budget=budget,
+        updates=ceil(budget / (training_config.context_length * training_config.global_batch_size)),
+    )
+    write_manifest(
+        corpus,
+        TokenCorpus(corpus, "train").manifest["splits"],
+        tokenizer=DEFAULT_TOKENIZER,
+        tokenizer_max_id=7,
+    )
+    monkeypatch.setattr(training, "train", partial(training.train, device="cpu"))
+    for cell in cells[4:]:
+        execute(cell)
+    assert env["PROXY_DATA"].is_relative_to(tmp_path / "ssd")
+    assert env["result"]["status"] == "complete" and env["result"]["validation_loss"] > 0
+    assert list(env["RUNS"].glob("*/result.json")) == [env["RUNS"] / "trial_000/result.json"]
+    assert (
+        json.loads((env["OUTPUT"] / "run.json").read_text())["hyperparameters"]
+        == env["trial"]["hyperparameters"]
+    )
 
 
 def test_timing_notebook_trains_one_random_main_without_a_sweep(
