@@ -54,6 +54,7 @@ class ModelConfig:
             "modified",
             "residual_tanh",
             "previous_attention_relu",
+            "previous_attention_relu_with_alpha",
             *GATE_VARIANTS,
         ):
             raise ValueError(f"Unknown model family: {self.family!r}")

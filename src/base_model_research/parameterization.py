@@ -25,7 +25,9 @@ def build_model(config, hp, device="cpu", initialize=True):
     register_shapes(model)
     if initialize:
         for name, parameter in model.named_parameters():
-            if parameter.ndim == 1:
+            if name.endswith(".previous_attention_alpha"):
+                torch.nn.init.zeros_(parameter)
+            elif parameter.ndim == 1:
                 torch.nn.init.ones_(parameter)
             else:
                 mup_init.normal_(parameter, std=config.initializer_std * hp.init_multiplier)

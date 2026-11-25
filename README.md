@@ -68,6 +68,10 @@ The [previous-attention ReLU notebook in Colab](https://colab.research.google.co
 trains trial 000 once with `ReLU(x + current_attention + previous_attention)`. Its FFN width of 432
 and 16 query / 8 KV heads match the standard 13,326,336-parameter proxy.
 
+To let each layer learn how much previous attention to add, run the
+[trial 000 learned-alpha notebook in Colab](https://colab.research.google.com/github/seungjun-green/base-model-research/blob/main/notebooks/trial_000_previous_attention_relu_with_alpha_proxy.ipynb).
+It saves the 27 layer weights alongside each validation loss.
+
 All Colab notebooks use the selected runtime's Python and PyTorch. Setup
 installs the project and its dependencies into that runtime. Notebook 06 also
 installs the evaluation harness. The Git commit is saved once per experiment.

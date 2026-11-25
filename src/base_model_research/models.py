@@ -101,10 +101,16 @@ class ResidualTanhGate(ConnectionGate):
 
 
 class DecoderLayer(nn.Module):
-    def __init__(self, config, hp):
+    def __init__(self, config, hp, *, layer_index=0):
         super().__init__()
         self.modified = config.family in ("modified", "residual_tanh")
-        self.previous_attention_relu = config.family == "previous_attention_relu"
+        self.previous_attention_relu = config.family in (
+            "previous_attention_relu",
+            "previous_attention_relu_with_alpha",
+        )
+        self.previous_attention_alpha = None
+        if config.family == "previous_attention_relu_with_alpha" and layer_index > 0:
+            self.previous_attention_alpha = nn.Parameter(torch.zeros(()))
         self.input_norm = RMSNorm(config.d_model, config.rms_norm_eps)
         self.post_attention_norm = RMSNorm(config.d_model, config.rms_norm_eps)
         self.attention = Attention(config, hp.attention_multiplier)
@@ -122,6 +128,8 @@ class DecoderLayer(nn.Module):
             h = x + attention
             if self.previous_attention_relu:
                 if previous_attention is not None:
+                    if self.previous_attention_alpha is not None:
+                        previous_attention = self.previous_attention_alpha * previous_attention
                     h = h + previous_attention
                 h = F.relu(h)
         ffn = self.ffn(self.post_attention_norm(h))
@@ -184,7 +192,7 @@ class ResearchLM(nn.Module):
         self.layers = nn.ModuleList(
             GateVariantLayer(config, hp)
             if index > 0 and config.family in GATE_VARIANTS
-            else DecoderLayer(config, hp)
+            else DecoderLayer(config, hp, layer_index=index)
             for index in range(config.n_layers)
         )
         self.final_norm = RMSNorm(config.d_model, config.rms_norm_eps)

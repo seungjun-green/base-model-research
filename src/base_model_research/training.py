@@ -389,6 +389,12 @@ def _train_locked(
                     failure = {"failed_at_step": step, "failure_reason": "Nonfinite validation loss"}
                     break
                 metrics["validation_loss"] = final_validation
+                if model_config.family == "previous_attention_relu_with_alpha":
+                    metrics["alpha_by_layer"] = {
+                        str(number): layer.previous_attention_alpha.item()
+                        for number, layer in enumerate(model.layers, start=1)
+                        if layer.previous_attention_alpha is not None
+                    }
             if step % config.log_interval == 0 or consumed == budget or "validation_loss" in metrics:
                 with metrics_path.open("a") as stream:
                     stream.write(json.dumps(metrics, allow_nan=False) + "\n")

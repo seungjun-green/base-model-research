@@ -594,6 +594,55 @@ notebook(
     experiment="proxy_previous_attention_relu",
 )
 
+notebook(
+    "trial_000_previous_attention_relu_with_alpha_proxy.ipynb",
+    "Trial 000 · ReLU proxy with a learned weight on previous attention",
+    [
+        markdown("""
+            This notebook trains one 28-layer proxy with trial 000's hyperparameters and seed 42.
+            Each layer computes `h = relu(x + current_attention + alpha * previous_attention)`,
+            followed by the standard SwiGLU FFN and its residual addition.
+
+            Layers 2–28 each learn one scalar alpha, shared across every sequence, position and
+            feature. Each alpha starts at zero and can become positive or negative. Layer 1 computes
+            `relu(x + current_attention)` because it has no previous attention output.
+
+            The notebook uses the TinyLlama-tokenized FineWeb-Edu corpus, trains on 20 tokens per
+            parameter, and records all 27 alphas at each of 20 validations. Rerunning a completed
+            trial displays its saved results. An interrupted proxy restarts from its original seed.
+        """),
+        *trial_000_proxy_cells(
+            family="previous_attention_relu_with_alpha",
+            backbone="standard",
+            label="Previous attention + learned alpha",
+            startup_message="Training trial 000 with a zero-initialized alpha in layers 2–28.",
+        ),
+        code("""
+            # Show the layer weights from the latest completed validation.
+            metrics_path = OUTPUT / "metrics.jsonl"
+            latest = None
+            if metrics_path.is_file():
+                with metrics_path.open() as stream:
+                    for line in stream:
+                        row = json.loads(line)
+                        if "alpha_by_layer" in row:
+                            latest = row
+            if latest is None:
+                print("The run has no saved validation yet.")
+            else:
+                print(f"Validation loss {latest['validation_loss']:.4f} at update {latest['step']:,}")
+                print("Layer   Learned alpha")
+                for layer, alpha in latest["alpha_by_layer"].items():
+                    print(f"{int(layer):>5}   {alpha:+.6f}")
+                print(f"All validation losses and layer weights: {metrics_path}")
+        """),
+    ],
+    proxy_controls=code("""
+        MICROBATCH_SIZE = 16  # Sequences per GPU microbatch. Choose a divisor of 128.
+    """),
+    experiment="proxy_previous_attention_relu_with_alpha",
+)
+
 for family, number, proxy_number in (("standard", "04", "02"), ("modified", "05", "03")):
     notebook(
         f"{number}_train_{family}_main.ipynb",

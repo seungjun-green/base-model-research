@@ -77,6 +77,28 @@ def test_modified_equations_and_first_layer(tiny_config, hp):
         x, a_previous, f_previous = expected, a, f
 
 
+def test_previous_attention_alpha_is_a_trainable_scalar_on_only_the_previous_branch(tiny_config, hp):
+    model = build_model(replace(tiny_config, family="previous_attention_relu_with_alpha", n_layers=3), hp)
+    first, second, third = model.layers
+    assert first.previous_attention_alpha is None
+    for layer in (second, third):
+        assert layer.previous_attention_alpha.shape == ()
+        assert layer.previous_attention_alpha.item() == 0.0
+    assert second.previous_attention_alpha is not third.previous_attention_alpha
+
+    x = torch.randn(2, 3, tiny_config.d_model)
+    previous = torch.randn_like(x, requires_grad=True)
+    with torch.no_grad():
+        second.previous_attention_alpha.fill_(-0.5)
+    output, current, _ = second(x, previous)
+    h = F.relu(x + current - 0.5 * previous)
+    expected = h + second.ffn(second.post_attention_norm(h))
+    torch.testing.assert_close(output, expected)
+    output.sum().backward()
+    assert second.previous_attention_alpha.grad.abs() > 0
+    assert previous.grad.abs().sum() > 0
+
+
 def test_previous_block_branch_is_differentiable(tiny_config, hp):
     model = build_model(replace(tiny_config, family="modified"), hp)
     layer = model.layers[0]
