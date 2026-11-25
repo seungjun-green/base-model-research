@@ -1,31 +1,27 @@
 # Base model architecture research
 
-PyTorch implementation of the experiment in [PROJECT_OUTLINE.md](PROJECT_OUTLINE.md):
-a standard Qwen3-style decoder and a decoder whose residual connections use the
-previous layer's attention/FFN outputs through GELU gates. Both train from scratch
-with μP. Colab notebooks launch a shared training package.
-
-The default experiment has 64 proxy trials and two main runs. **No full training
-has been performed. GPU correctness, memory, throughput, and μP activation
-diagnostics must be checked on the target Blackwell runtime before full sweeps.**
+The PyTorch proxy experiments compare a standard Qwen3-style decoder with a
+decoder that learns how much previous-layer attention to add before ReLU.
+Both train from scratch with μP on the same 32 hyperparameter combinations.
+The [original experiment outline](PROJECT_OUTLINE.md) describes the earlier GELU-gated architecture.
 
 ## Models and protocol
 
 | Configuration | Unique parameters | Training targets (20× parameters) |
 |---|---:|---:|
 | Standard proxy | 13,326,336 | 266,526,720 |
-| Modified proxy | 13,362,624 | 267,252,480 |
+| Modified proxy (learned alpha) | 13,326,363 | 266,527,260 |
 | Standard main | 157,814,784 | 3,156,295,680 |
-| Modified main | 158,395,392 | 3,167,907,840 |
+| Modified main (original GELU gates) | 158,395,392 | 3,167,907,840 |
 
 All four models use the 32,000-token [TinyLlama tokenizer](https://huggingface.co/TinyLlama/TinyLlama-1.1B-intermediate-step-1431k-3T).
 Regenerate FineWeb-Edu with notebook 01 for this experiment. Earlier Qwen-tokenized shards
 and checkpoints belong to the original experiment.
 All models have 28 layers, tied embeddings, QK normalization, RoPE, and SwiGLU.
 Attention projections use explicit head dimensions; query heads × head dimension
-does not have to equal hidden width. The modified layer implements the equations
-in the outline exactly, including the first-layer fallback and differentiable
-previous-output branches.
+does not have to equal hidden width. The modified proxy uses the standard proxy's
+dimensions. Its attention update is `relu(x + current_attention + alpha * previous_attention)`.
+Each of layers 2–28 learns one zero-initialized scalar. Layer 1 uses `relu(x + current_attention)`.
 
 Shared defaults: seed 42, context 2048, global batch 128, Adam betas (0.9, 0.95),
 epsilon 1e-8, zero weight decay, global gradient clipping 1.0, BF16 autocast with
@@ -68,9 +64,9 @@ The [previous-attention ReLU notebook in Colab](https://colab.research.google.co
 trains trial 000 once with `ReLU(x + current_attention + previous_attention)`. Its FFN width of 432
 and 16 query / 8 KV heads match the standard 13,326,336-parameter proxy.
 
-To let each layer learn how much previous attention to add, run the
-[trial 000 learned-alpha notebook in Colab](https://colab.research.google.com/github/seungjun-green/base-model-research/blob/main/notebooks/trial_000_previous_attention_relu_with_alpha_proxy.ipynb).
-It saves the 27 layer weights alongside each validation loss.
+Run all 32 learned-alpha proxies in [notebook 03 in Colab](https://colab.research.google.com/github/seungjun-green/base-model-research/blob/main/notebooks/03_modified_proxy_search.ipynb).
+It reuses a matching completed run from the [standalone trial 000 notebook](notebooks/trial_000_previous_attention_relu_with_alpha_proxy.ipynb)
+and saves the 27 layer weights alongside each validation loss.
 
 All Colab notebooks use the selected runtime's Python and PyTorch. Setup
 installs the project and its dependencies into that runtime. Notebook 06 also
@@ -95,7 +91,7 @@ python -m pytest -q
 ```bash
 bmr prepare-data --output data/fineweb_edu_tinyllama
 bmr sweep --model configs/models/standard_proxy.yaml --data data/fineweb_edu_tinyllama --output runs/standard_vs_gated_160m_tinyllama/proxy
-bmr sweep --model configs/models/modified_proxy.yaml --data data/fineweb_edu_tinyllama --output runs/standard_vs_gated_160m_tinyllama/proxy
+bmr sweep --model configs/models/modified_proxy.yaml --data data/fineweb_edu_tinyllama --output runs/learned_alpha_proxy_sweep/proxy
 ```
 
 `experiments/trials_seed42.json` is the committed list of 32 combinations. Its
@@ -155,7 +151,9 @@ training-token position. `checkpoints/latest.json` identifies the latest complet
 save by step and SHA-256 checksum. The final save includes the last optimizer update.
 
 On hosted Colab, approve the Drive mount in **Experiment storage**. Checkpoints and
-results go to `My Drive/bmr/runs/standard_vs_gated_160m_tinyllama/`. Notebook 01 saves the shared
+results go under `My Drive/bmr/runs/`. Notebook 03 uses `learned_alpha_proxy_sweep/`
+for the learned-alpha sweep. The standard and original GELU-gated experiments use
+`standard_vs_gated_160m_tinyllama/`. Notebook 01 saves the shared
 corpus under `My Drive/bmr/data/` for use across runtimes. The proxy smoke run
 trains trial 000 on its full 20-tokens-per-parameter budget. The full search
 reuses the completed trial. Both proxy notebooks copy the required training and validation

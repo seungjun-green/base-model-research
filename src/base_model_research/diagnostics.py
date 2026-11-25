@@ -13,7 +13,7 @@ from .training import autocast_context, environment_report, seed_everything
 DEFAULT_HP = Hyperparameters(0.001, 1.0, 1.0, 1.0, 1.0)
 EXPECTED_COUNTS = {
     "standard_proxy": 13_326_336,
-    "modified_proxy": 13_362_624,
+    "modified_proxy": 13_326_363,
     "standard_main": 157_814_784,
     "modified_main": 158_395_392,
 }

@@ -422,7 +422,7 @@ def test_gate_comparison_notebook_records_and_reuses_each_outcome(
     assert 'drive.mount("/content/drive")' in cells[0]
     config_dir = tmp_path / "configs/models"
     config_dir.mkdir(parents=True)
-    (config_dir / "modified_proxy.yaml").write_text(yaml.safe_dump(asdict(replace(tiny_config, n_layers=2))))
+    (config_dir / "modified_main.yaml").write_text(yaml.safe_dump(asdict(replace(tiny_config, n_layers=2))))
     (config_dir.parent / "training.yaml").write_text(yaml.safe_dump(asdict(training_config)))
     (tmp_path / "experiments").symlink_to(Path("experiments").resolve())
     splits = TokenCorpus(corpus, "train").manifest["splits"]
@@ -516,11 +516,15 @@ def test_proxy_notebook_smoke_finishes_one_trial_and_full_skips_it(
     from dataclasses import asdict
 
     from base_model_research import progress
+    from base_model_research.config import Hyperparameters, ModelConfig
+    from base_model_research.training import train
 
     path = next(Path("notebooks").glob(f"*_{family}_proxy_search.ipynb"))
     cells = [c["source"] for c in json.loads(path.read_text())["cells"] if c["cell_type"] == "code"]
     assert 'drive.mount("/content/drive")' in cells[0]
-    model = replace(tiny_config, family=family)
+    model = replace(tiny_config, family=ModelConfig.load(f"configs/models/{family}_proxy.yaml").family)
+    if family == "modified":
+        model = replace(model, n_layers=2, d_model=2, base_d_model=2)
     training = replace(training_config, tokens_per_parameter=20)
     config_dir = tmp_path / "configs"
     (config_dir / "models").mkdir(parents=True)
@@ -529,14 +533,25 @@ def test_proxy_notebook_smoke_finishes_one_trial_and_full_skips_it(
     search = tmp_path / "search.yaml"
     search.write_text(yaml.safe_dump({**load_mapping("configs/search.yaml"), "trials": 2}))
     trials = tmp_path / "trials.json"
-    generate_trials(search, trials)
-    runs = tmp_path / "runs"
+    manifest = generate_trials(search, trials)
+    runs = tmp_path / "sweep"
     runs.mkdir()
     # A notebook override must take precedence over the profile.
     profile = runs / f"{family}_proxy_profile.json"
     profile.write_text(json.dumps({"training": {"microbatch_size": 1, "activation_checkpointing": False}}))
 
     calls = []
+    standalone = runs.parent / "proxy_previous_attention_relu_with_alpha" / "trial_000"
+    if family == "modified":
+        train(
+            model,
+            Hyperparameters(**manifest["trials"][0]["hyperparameters"]),
+            training,
+            corpus,
+            standalone,
+            device="cpu",
+            selection={"trial_id": "trial_000"},
+        )
 
     def run_with_progress(command, *, cwd):
         data = Path(command[command.index("--data") + 1])
@@ -545,6 +560,10 @@ def test_proxy_notebook_smoke_finishes_one_trial_and_full_skips_it(
         assert data != corpus and size == 2 and "--cache-dir" not in command
         assert "--stop-after-updates" not in command and "--activation-checkpointing" not in command
         calls.append(data)
+        reuse = (
+            Path(command[command.index("--reuse-trial-000") + 1]) if "--reuse-trial-000" in command else None
+        )
+        assert reuse == (standalone if family == "modified" else None)
         sweep(
             model,
             replace(training, microbatch_size=size),
@@ -553,6 +572,7 @@ def test_proxy_notebook_smoke_finishes_one_trial_and_full_skips_it(
             trials,
             device="cpu",
             end=int(command[command.index("--end") + 1]) if "--end" in command else None,
+            reuse_trial_000=reuse,
         )
 
     monkeypatch.setattr(progress, "run_with_progress", run_with_progress)
@@ -569,8 +589,9 @@ def test_proxy_notebook_smoke_finishes_one_trial_and_full_skips_it(
         exec(compile(source, str(path), "exec"), env)  # noqa: S102 - generated notebook code
 
     execute(cells[1])
-    assert env["MICROBATCH_SIZE"] == 4
-    env.update(MICROBATCH_SIZE=2, RUN_FULL=True)
+    assert env["MICROBATCH_SIZE"] == (None if family == "modified" else 4)
+    assert env["RUN_FULL"] == (family == "modified")
+    env.update(MICROBATCH_SIZE=None if family == "modified" else 2, RUN_FULL=True, RUN_SMOKE=True)
     # Skip checkout and pip installation, as Colab setup has its own test.
     execute(cells[2][cells[2].index("sys.path.insert(") :])
     execute(cells[3])
@@ -589,6 +610,10 @@ def test_proxy_notebook_smoke_finishes_one_trial_and_full_skips_it(
     assert run["data_fingerprint"] == TokenCorpus(corpus, "train").fingerprint
     metrics = [json.loads(line) for line in (first_trial / "metrics.jsonl").read_text().splitlines()]
     assert sum("validation_loss" in row for row in metrics) == 20
+    if family == "modified":
+        assert all("alpha_by_layer" in row for row in metrics if "validation_loss" in row)
+        assert run["selection"] == {"trial_id": "trial_000"}
+        assert (standalone / "result.json").read_bytes() == result_path.read_bytes()
     assert not second_trial.exists() and not (family_runs / "best_hparams.json").exists()
     first_save = result_path.stat().st_mtime_ns
 
@@ -603,7 +628,37 @@ def test_proxy_notebook_smoke_finishes_one_trial_and_full_skips_it(
     assert json.loads((second_trial / "result.json").read_text())["status"] == "complete"
     assert len(calls) == 2 and calls[0] == calls[1]
     assert not list(family_runs.rglob("*.pt"))
-    assert (family_runs / "best_hparams.json").is_file()
+    assert json.loads((family_runs / "best_hparams.json").read_text())["family"] == model.family
+
+
+@pytest.mark.parametrize("standalone_case", ["interrupted", "different_seed", "old_gates"])
+def test_sweep_trains_fresh_when_standalone_does_not_qualify(
+    tmp_path, corpus, tiny_config, training_config, standalone_case
+):
+    from base_model_research.config import Hyperparameters
+    from base_model_research.training import train
+
+    trials = tmp_path / "trials.json"
+    trial = generate_trials("configs/search.yaml", trials)["trials"][0]
+    model = replace(tiny_config, family="previous_attention_relu_with_alpha", n_layers=2)
+    source = tmp_path / "standalone" / "trial_000"
+    train(
+        replace(model, family="modified") if standalone_case == "old_gates" else model,
+        Hyperparameters(**trial["hyperparameters"]),
+        replace(training_config, seed=17) if standalone_case == "different_seed" else training_config,
+        corpus,
+        source,
+        device="cpu",
+        selection={"trial_id": "trial_000"},
+        stop_after_updates=1 if standalone_case == "interrupted" else None,
+    )
+    original = (source / "result.json").read_bytes()
+    output = tmp_path / "sweep"
+    rows = sweep(model, training_config, corpus, output, trials, device="cpu", end=1, reuse_trial_000=source)
+    assert rows[0]["status"] == "complete"
+    run = json.loads((output / model.family / "trial_000" / "run.json").read_text())
+    assert run["selection"] is None and run["training"]["seed"] == training_config.seed
+    assert (source / "result.json").read_bytes() == original
 
 
 def test_proxy_stages_only_its_prefix_and_validation_and_recovers_bad_copies(tmp_path, corpus, monkeypatch):

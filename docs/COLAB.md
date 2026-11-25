@@ -4,7 +4,7 @@
 
 In hosted Colab, select **CPU** for notebook 01 and **RTX PRO 6000** for the
 training, profiling, and benchmark notebooks. Run **Experiment storage** in each notebook and approve the Google Drive mount.
-The cell prints the experiment folder shared by all notebooks.
+The cell prints the notebook's experiment folder.
 
 Allow about 12.7 GB of runtime disk for corpus preparation or full main training,
 plus room for download caches. FP32 model weights, gradients, and two Adam moments
@@ -44,9 +44,9 @@ reopens the saved experiment. All notebooks launch the same Python package.
 1. `00_setup_and_checks.ipynb`: inspect environment and diagnostics; profile the four shapes.
 2. `01_prepare_data.ipynb`: prepare the common dataset once.
 3. `02_standard_proxy_search.ipynb`: standard family's 32 trials.
-4. `03_modified_proxy_search.ipynb`: modified family's same 32 combinations.
+4. `03_modified_proxy_search.ipynb`: previous attention + ReLU with a learned weight per layer, using the standard proxy's 32 combinations.
 5. `04_train_standard_main.ipynb`: transfer the standard winning settings.
-6. `05_train_modified_main.ipynb`: transfer the modified winning settings.
+6. `05_train_modified_main.ipynb`: original GELU-gated main model, which requires a winner from its original gated proxy.
 7. `06_benchmarks.ipynb`: run the five-model comparison.
 
 With your original `My Drive/bmr/data/fineweb_edu` upload, open the [optional 158M timing notebook](https://colab.research.google.com/github/seungjun-green/base-model-research/blob/main/notebooks/time_standard_main.ipynb)
@@ -55,14 +55,20 @@ Colab decodes the original Qwen tokens and re-encodes documents with TinyLlama o
 The ETA includes this conversion. Checkpoints and metrics go under `My Drive/bmr/runs/standard_158m_timing_fineweb_edu/`.
 
 In notebooks 02 and 03, the first code cell mounts Google Drive. In the next cell,
-set `MICROBATCH_SIZE`, `RUN_SMOKE`, and `RUN_FULL`. The microbatch defaults to 4 sequences
-and must divide 128. For an existing sweep, use its recorded microbatch size.
+set `MICROBATCH_SIZE`, `RUN_SMOKE`, and `RUN_FULL`. Notebook 02 defaults to 4 sequences.
+In 03, `MICROBATCH_SIZE = None` uses the ongoing sweep's size, then the standalone
+trial's size if available, otherwise 16. A manual size must divide 128.
 To run a fresh sweep with a different size, choose a new `EXPERIMENT` in the storage cell
 and use that name in subsequent notebooks for that experiment.
-The default enables only `RUN_SMOKE`, which trains trial 000 on 20 tokens per
+Notebook 02 enables only `RUN_SMOKE`, which trains trial 000 on 20 tokens per
 parameter (about 267 million tokens) and validates 20 times. For the full search,
 set `RUN_SMOKE = False` and `RUN_FULL = True`. A completed trial 000 counts toward
 the 32, leaving 31 trials. Enabling both runs trial 000 first and then the remaining trials.
+
+Notebook 03 enables the full sweep by default. It checks the standalone learned-alpha
+`trial_000` on Drive and reuses it if the architecture, hyperparameters, training
+settings and corpus match. Find `results.csv`, `best_hparams.json`, and per-trial
+metrics under `My Drive/bmr/runs/learned_alpha_proxy_sweep/proxy/previous_attention_relu_with_alpha/`.
 
 Notebooks 02–05 display a tqdm bar for optimizer updates with training loss, tokens
 per second, and estimated time remaining. A resumed main run starts the bar at its saved step.
@@ -92,7 +98,7 @@ each run reads only its assigned training prefix.
 If tokenization itself was interrupted, rerunning starts it again in a fresh temporary directory.
 Notebook 06 reads just the saved tokenizer.
 
-Run outputs go directly to `My Drive/bmr/runs/standard_vs_gated_160m_tinyllama/`. To continue
+The standard and original gated runs use `My Drive/bmr/runs/standard_vs_gated_160m_tinyllama/`. To continue
 an existing experiment, use its original folder name for `EXPERIMENT` in all notebooks.
 
 | Notebook | Output in the experiment folder |
@@ -106,7 +112,7 @@ Each checkpoint contains the updated weights, optimizer state and position in th
 training stream. The 20th includes the last gradient update. Notebook 06 loads
 that final checkpoint from each completed run.
 
-Notebooks 04 and 05 find the corresponding proxy winner in the current experiment.
+Notebooks 04 and 05 find the standard and original GELU-gated winners, respectively, in the current experiment.
 To reuse one from a different experiment, set `WINNER` to its `best_hparams.json` path. They use the
 shared corpus and verify each winner's training settings and dataset fingerprint.
 Earlier weights-only files can still be evaluated with their original protocol.

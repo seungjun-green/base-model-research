@@ -34,7 +34,7 @@ def test_residual_tanh_matches_original_gates_plus_skip_including_first_layer(ti
         torch.testing.assert_close((actual, actual_a, actual_f), (expected, a, f), rtol=0, atol=0)
         x, a_prev, f_prev = expected, a, f
 
-    proxy = replace(ModelConfig.load("configs/models/modified_proxy.yaml"), family="residual_tanh")
+    proxy = replace(ModelConfig.load("configs/models/modified_main.yaml").at_width(1), family="residual_tanh")
     with torch.device("meta"):
         real = ResearchLM(proxy, hp)
     assert parameter_count(real) == 13_362_624 and len(real.layers) == 28
@@ -94,7 +94,7 @@ def test_residual_tanh_notebook_trains_logs_and_plots(
     assert 'drive.mount("/content/drive")' in cells[0] and "proxy_residual_tanh" in cells[0]
     folder = tmp_path / "configs/models"
     folder.mkdir(parents=True)
-    (folder / "modified_proxy.yaml").write_text(
+    (folder / "modified_main.yaml").write_text(
         yaml.safe_dump(asdict(replace(tiny_config, family="modified", n_layers=2)))
     )
     (folder.parent / "training.yaml").write_text(yaml.safe_dump(asdict(training_config)))

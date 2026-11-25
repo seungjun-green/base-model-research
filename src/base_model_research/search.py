@@ -1,8 +1,10 @@
 import csv
 import json
 import math
+import shutil
 from dataclasses import asdict
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import numpy as np
 
@@ -49,8 +51,7 @@ def load_trials(path):
     return manifest
 
 
-def _read_trial(root, trial, family):
-    directory = root / trial["id"]
+def _read_trial(directory, trial, family):
     run_path = directory / "run.json"
     result_path = directory / "result.json"
     pending = {"status": "pending"}
@@ -78,6 +79,38 @@ def _trial_protocol(run):
     return {key: run[key] for key in ("model", "training", "data_fingerprint")}
 
 
+def _reuse_trial_000(source, root, trial, expected):
+    """Import a finished standalone run atomically while its files are locked."""
+    target = root / trial["id"]
+    if trial["id"] != "trial_000" or target.exists() or not (source / "result.json").is_file():
+        return
+    with run_lock(source):
+        run = json.loads((source / "run.json").read_text())
+        if (
+            canonical_json(_trial_protocol(run)) != expected
+            or run["hyperparameters"] != trial["hyperparameters"]
+        ):
+            print("Standalone trial 000 used different settings or data. Training a fresh trial.", flush=True)
+            return
+        _, result = _read_trial(source, trial, run["model"]["family"])
+        if result["status"] != "complete":
+            return
+        if result["step"] != run["total_steps"] or run["token_budget"] != (
+            run["parameters"] * run["training"]["tokens_per_parameter"]
+        ):
+            raise ValueError(f"{source}: inconsistent standalone trial budget")
+        with TemporaryDirectory(dir=root) as tmp:
+            staged = Path(tmp) / trial["id"]
+            staged.mkdir()
+            for name in ("run.json", "result.json", "metrics.jsonl", "parameter_groups.json"):
+                shutil.copyfile(source / name, staged / name)
+            staged.rename(target)
+    print(
+        f"Reused completed standalone trial 000 (validation loss {result['validation_loss']:.4f}).",
+        flush=True,
+    )
+
+
 def summarize(root, manifest, family):
     root = Path(root)
     with run_lock(root, blocking=True):
@@ -87,7 +120,7 @@ def summarize(root, manifest, family):
 def _summarize_locked(root, manifest, family):
     rows, candidates, identities = [], [], set()
     for trial in manifest["trials"]:
-        run, result = _read_trial(root, trial, family)
+        run, result = _read_trial(root / trial["id"], trial, family)
         row = {
             "trial_id": trial["id"],
             **trial["hyperparameters"],
@@ -146,6 +179,8 @@ def sweep(
     remote=None,
     progress=None,
     cache_dir=None,
+    *,
+    reuse_trial_000=None,
 ):
     manifest = load_trials(trials_path)
     end = len(manifest["trials"]) if end is None else end
@@ -170,9 +205,11 @@ def sweep(
             )
         if manifest_path.exists() and json.loads(manifest_path.read_text()) != manifest:
             raise ValueError("This sweep directory already belongs to a different trial manifest")
+        if reuse_trial_000 is not None:
+            _reuse_trial_000(Path(reuse_trial_000), root, manifest["trials"][0], expected)
         # Validate the whole sweep before skipping finished runs or starting a costly new one.
         for trial in manifest["trials"]:
-            run, previous = _read_trial(root, trial, model_config.family)
+            run, previous = _read_trial(root / trial["id"], trial, model_config.family)
             if previous["status"] in ("complete", "diverged"):
                 terminal_ids.add(trial["id"])
             if run is not None and canonical_json(_trial_protocol(run)) != expected:
@@ -192,7 +229,7 @@ def sweep(
         directory = root / trial["id"]
         if trial["id"] in terminal_ids:
             continue
-        _, result = _read_trial(root, trial, model_config.family)
+        _, result = _read_trial(directory, trial, model_config.family)
         if result["status"] not in ("complete", "diverged"):
             hp = Hyperparameters(**trial["hyperparameters"])
             result = train(

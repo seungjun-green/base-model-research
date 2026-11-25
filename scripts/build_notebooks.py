@@ -290,20 +290,46 @@ write_notebook(
 )
 
 for family, number in (("standard", "02"), ("modified", "03")):
+    learned_alpha = family == "modified"
+    architecture = (
+        "Modified 13.3M proxy · previous attention + ReLU with learned alpha"
+        if learned_alpha
+        else "Standard 13.3M proxy"
+    )
+    experiment = "learned_alpha_proxy_sweep" if learned_alpha else "standard_vs_gated_160m_tinyllama"
+    reuse_arg = (
+        ', reuse_trial_000=RUNS.parent / "proxy_previous_attention_relu_with_alpha" / "trial_000"'
+        if learned_alpha
+        else ""
+    )
+    introduction = []
+    if learned_alpha:
+        introduction.append(
+            markdown("""
+            Each layer computes `relu(x + current_attention + alpha * previous_attention)`.
+            Layers 2–28 learn one scalar each, starting at zero. The 32 trials use the
+            standard sweep's hyperparameter list and full-width backbone. Each trial trains on
+            266,527,260 TinyLlama tokens and saves all 27 alphas at each of 20 validations.
+            A matching completed trial 000 from the standalone learned-alpha notebook counts
+            toward the 32 automatically.
+        """)
+        )
     notebook(
         f"{number}_{family}_proxy_search.ipynb",
-        f"{family.title()} 13.3M proxy: 32 shared trials",
+        f"{architecture}: 32 shared trials",
         [
+            *introduction,
             code(f"""
             # Copy proxy data from Google Drive to /content
             PROXY_DATA = stage_proxy_data(SAVED_DATA, DATA, proxy_training_targets(REPO, "{family}"))
             print(f"Proxy data ready at {{PROXY_DATA}}.")
         """),
             code(f"""
-            FAMILY_RUNS = RUNS / "proxy" / "{family}"
+            FAMILY_RUNS = RUNS / "proxy" / ModelConfig.load(REPO / "configs/models/{family}_proxy.yaml").family
+            print("Sweep results:", FAMILY_RUNS)
 
             def run_proxy(*, first_only=False):
-                sweep_args = proxy_sweep_args(REPO, RUNS, "{family}", MICROBATCH_SIZE, PROXY_DATA)
+                sweep_args = proxy_sweep_args(REPO, RUNS, "{family}", MICROBATCH_SIZE, PROXY_DATA{reuse_arg})
                 options = ["--end", 1] if first_only else []
                 print("Starting the {family} proxy trainer…", flush=True)
                 run_with_progress([sys.executable, "-u", "-m", "base_model_research.cli", "sweep",
@@ -333,11 +359,12 @@ for family, number in (("standard", "02"), ("modified", "03")):
                 print("Full run disabled.")
         """),
         ],
-        proxy_controls=code("""
+        experiment=experiment,
+        proxy_controls=code(f"""
             # Run controls
-            MICROBATCH_SIZE = 4  # Sequences per GPU microbatch. Choose a divisor of 128.
-            RUN_SMOKE = True
-            RUN_FULL = False
+            MICROBATCH_SIZE = {"None  # Reuse the saved size, or default to 16. Set a divisor of 128 to override." if learned_alpha else "4  # Sequences per GPU microbatch. Choose a divisor of 128."}
+            RUN_SMOKE = {not learned_alpha}
+            RUN_FULL = {learned_alpha}
             # RUN_SMOKE trains one full trial (~267M tokens, 20 validations).
             # RUN_FULL runs the 32-trial search and skips completed trials, including trial 000.
         """),
@@ -375,7 +402,7 @@ notebook(
                          if t["id"] == "trial_000")
             hp = Hyperparameters(**trial["hyperparameters"])
             settings = TrainConfig.load(REPO / "configs/training.yaml", microbatch_size=MICROBATCH_SIZE)
-            proxy = ModelConfig.load(REPO / "configs/models/modified_proxy.yaml")
+            proxy = ModelConfig.load(REPO / "configs/models/modified_main.yaml").at_width(1)
             models = [replace(proxy, family=name) for name in GATE_VARIANTS]
             with torch.device("meta"):
                 counts = {m.family: parameter_count(ResearchLM(m, hp)) for m in models}
@@ -478,7 +505,7 @@ def trial_000_proxy_cells(*, family, backbone, label, startup_message):
             trial = next(t for t in load_trials(REPO / "experiments/trials_seed42.json")["trials"]
                          if t["id"] == "trial_000")
             hp = Hyperparameters(**trial["hyperparameters"])
-            model = replace(ModelConfig.load(REPO / "configs/models/{backbone}_proxy.yaml"), family="{family}")
+            model = replace(ModelConfig.load(REPO / "configs/models/{backbone}.yaml").at_width(1), family="{family}")
             settings = TrainConfig.load(REPO / "configs/training.yaml", microbatch_size=MICROBATCH_SIZE)
             with torch.device("meta"):
                 budget = parameter_count(ResearchLM(model, hp)) * settings.tokens_per_parameter
@@ -532,7 +559,7 @@ notebook(
         """),
         *trial_000_proxy_cells(
             family="residual_tanh",
-            backbone="modified",
+            backbone="modified_main",
             label="Residual + tanh",
             startup_message="Initializing trial 000. Each update records all 112 gate matrices before clipping.",
         ),
@@ -577,7 +604,7 @@ notebook(
         """),
         *trial_000_proxy_cells(
             family="previous_attention_relu",
-            backbone="standard",
+            backbone="standard_proxy",
             label="Previous attention + ReLU",
             startup_message="Initializing the previous-attention ReLU proxy for trial 000.",
         ),
@@ -613,7 +640,7 @@ notebook(
         """),
         *trial_000_proxy_cells(
             family="previous_attention_relu_with_alpha",
-            backbone="standard",
+            backbone="standard_proxy",
             label="Previous attention + learned alpha",
             startup_message="Training trial 000 with a zero-initialized alpha in layers 2–28.",
         ),

@@ -12,11 +12,13 @@ from base_model_research.parameterization import build_model, make_optimizer
 
 def test_all_four_exact_parameter_counts():
     counts = check_parameter_counts()
-    for family in ("standard", "modified"):
-        proxy = ModelConfig.load(f"configs/models/{family}_proxy.yaml")
-        main = ModelConfig.load(f"configs/models/{family}_main.yaml")
-        assert proxy.width_mult == 1 and proxy.d_model == 144 and proxy.vocab_size == 32_000
-        assert proxy.at_width(4) == main
+    standard = ModelConfig.load("configs/models/standard_proxy.yaml")
+    assert standard.width_mult == 1 and standard.d_model == 144 and standard.vocab_size == 32_000
+    assert standard.at_width(4) == ModelConfig.load("configs/models/standard_main.yaml")
+    assert ModelConfig.load("configs/models/modified_proxy.yaml") == replace(
+        standard, family="previous_attention_relu_with_alpha"
+    )
+    assert counts["modified_proxy"]["parameters"] == counts["standard_proxy"]["parameters"] + 27
     assert counts["standard_main"]["parameters"] == 157_814_784
     assert counts["modified_main"]["parameters"] == 158_395_392
     assert max(row["training_tokens"] for row in counts.values()) == DEFAULT_TRAINING_TARGETS

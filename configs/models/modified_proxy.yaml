@@ -1,10 +1,10 @@
-family: modified
+family: previous_attention_relu_with_alpha
 d_model: 144
 n_layers: 28
-n_heads: 12
-n_kv_heads: 6
+n_heads: 16
+n_kv_heads: 8
 head_dim: 18
-d_ff: 315
+d_ff: 432
 base_d_model: 144
 base_head_dim: 18
-base_d_ff: 315
+base_d_ff: 432

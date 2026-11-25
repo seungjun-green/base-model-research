@@ -69,11 +69,14 @@ def main():
             )
         else:
             p.add_argument("--trials", default="experiments/trials_seed42.json")
+            p.add_argument("--reuse-trial-000", type=Path, help="Reuse a matching completed standalone trial")
             p.add_argument("--start", type=int, default=0)
             p.add_argument("--end", type=int)
     p = commands.add_parser("summarize")
     p.add_argument("--output", required=True, help="Family directory, e.g. runs/proxy/standard")
-    p.add_argument("--family", required=True, choices=["standard", "modified"])
+    p.add_argument(
+        "--family", required=True, choices=["standard", "modified", "previous_attention_relu_with_alpha"]
+    )
     p.add_argument("--trials", default="experiments/trials_seed42.json")
     p = commands.add_parser("benchmark")
     p.add_argument("--config", default="configs/evaluation.yaml")
@@ -164,6 +167,7 @@ def main():
                 args.remote,
                 progress=emit_progress if args.progress_events else None,
                 cache_dir=args.cache_dir,
+                reuse_trial_000=args.reuse_trial_000,
             )
         else:
             from .progress import emit_progress

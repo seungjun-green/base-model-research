@@ -69,15 +69,21 @@ def proxy_training_targets(repo, family):
     return parameters * config.tokens_per_parameter
 
 
-def proxy_sweep_args(repo, runs, family, microbatch_size, local):
+def proxy_sweep_args(repo, runs, family, microbatch_size, local, *, reuse_trial_000=None):
     model_name = f"{family}_proxy"
     model_path = repo / "configs" / "models" / f"{model_name}.yaml"
+    protocol = runs / "proxy" / ModelConfig.load(model_path).family / "protocol.json"
+    settings_path = runs / f"{model_name}_profile.json"
+    if reuse_trial_000 is not None and (reuse_trial_000 / "run.json").is_file():
+        settings_path = reuse_trial_000 / "run.json"
+    if protocol.is_file():
+        settings_path = protocol
+    settings = json.loads(settings_path.read_text())["training"] if settings_path.is_file() else {}
+    if microbatch_size is None and reuse_trial_000 is not None:
+        microbatch_size = settings.get("microbatch_size", 16)
     if type(microbatch_size) is not int:
         raise ValueError("MICROBATCH_SIZE must be a positive integer that divides the global batch size.")
     config = TrainConfig.load(repo / "configs" / "training.yaml", microbatch_size=microbatch_size)
-    protocol = runs / "proxy" / family / "protocol.json"
-    settings_path = protocol if protocol.is_file() else runs / f"{model_name}_profile.json"
-    settings = json.loads(settings_path.read_text())["training"] if settings_path.is_file() else {}
     if settings_path == protocol and settings["microbatch_size"] != microbatch_size:
         raise ValueError(
             f"This {family} sweep uses MICROBATCH_SIZE = {settings['microbatch_size']}. "
@@ -98,4 +104,6 @@ def proxy_sweep_args(repo, runs, family, microbatch_size, local):
     ]
     if settings.get("activation_checkpointing", config.activation_checkpointing):
         args.append("--activation-checkpointing")
+    if reuse_trial_000 is not None:
+        args.extend(["--reuse-trial-000", str(reuse_trial_000)])
     return args
