@@ -1,0 +1,72 @@
+{
+  "data_fingerprint": "9ee2ef306234dbf1cf7e2046e32b83eca44e09bbdf1f916e6f2e8f07d0d8871d",
+  "environment": {
+    "capability": [
+      12,
+      0
+    ],
+    "cuda_version": "13.0",
+    "git_commit": "a8408a588763131c7f6c0cfee07a16c7411c8a01",
+    "git_dirty": false,
+    "gpu": "NVIDIA RTX PRO 6000 Blackwell Server Edition",
+    "packages": {
+      "datasets": "4.8.5",
+      "mup": "1.0.0",
+      "numpy": "2.4.6",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.22.1"
+    },
+    "platform": "Linux-6.6.159+-x86_64-with-glibc2.39",
+    "python": "3.13.16",
+    "vram_bytes": 101974081536
+  },
+  "family": "standard",
+  "hyperparameters": {
+    "attention_multiplier": 2.163750253020504,
+    "embedding_multiplier": 8.73767825544199,
+    "init_multiplier": 0.5117430300313628,
+    "learning_rate": 0.018804561916113512,
+    "output_multiplier": 2.9741645839718345
+  },
+  "model": {
+    "base_d_ff": 432,
+    "base_d_model": 144,
+    "base_head_dim": 18,
+    "d_ff": 432,
+    "d_model": 144,
+    "family": "standard",
+    "head_dim": 18,
+    "initializer_std": 0.02,
+    "n_heads": 16,
+    "n_kv_heads": 8,
+    "n_layers": 28,
+    "rms_norm_eps": 1e-06,
+    "rope_theta": 1000000.0,
+    "vocab_size": 32000
+  },
+  "selection": "final_cross_entropy_at_full_token_budget",
+  "training": {
+    "activation_checkpointing": false,
+    "betas": [
+      0.9,
+      0.95
+    ],
+    "context_length": 2048,
+    "eps": 1e-08,
+    "global_batch_size": 128,
+    "grad_clip": 1.0,
+    "log_interval": 10,
+    "loss_chunk_size": 128,
+    "microbatch_size": 16,
+    "min_lr_ratio": 0.1,
+    "precision": "bf16",
+    "seed": 42,
+    "tokens_per_parameter": 20,
+    "validations_per_run": 20,
+    "warmup_fraction": 0.01,
+    "weight_decay": 0.0
+  },
+  "trial_id": "trial_004",
+  "trial_manifest_fingerprint": "5f98c271e58bfcd4a97298ada497c7e84af801dc20771f5ad2f35967f8dd2dcb",
+  "validation_loss": 4.454815793832125
+}
